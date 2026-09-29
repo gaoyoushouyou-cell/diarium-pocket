@@ -45,8 +45,16 @@
     { value: 2, emoji: "😐", name: "ふつう" },
     { value: 3, emoji: "😊", name: "ぐっすり" },
   ];
-  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入" };
-  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰" };
+  // 日記のテーマ(diary_extensions.THEME_TAGS の写し。PC 側は一覧に無いテーマを受け付けない)
+  const THEME_TAGS = [
+    "仕事", "学び", "家族", "友人", "健康", "運動",
+    "食事", "趣味", "お出かけ", "休息", "家事", "YouTube", "反省", "恋人", "瞑想", "その他",
+  ];
+  const PHOTO_MIMES = ["image/jpeg", "image/png", "image/webp"];
+  const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
+  const MAX_TASK_TEXT = 300;
+  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク" };
+  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅" };
 
   const pad = (n) => String(n).padStart(2, "0");
 
@@ -114,12 +122,29 @@
 
   /** PC 側で弾かれる内容を、スマホで保存する前に知らせる。問題なければ null。 */
   function validate(kind, data, todayStr) {
+    if (kind === "task") {
+      // タスクは「いつ書いたか」だけが大事なので日付欄は無い。期限は未来でもよい。
+      const text = String((data && data.text) || "").trim();
+      if (!text) return "やることを入力してください。";
+      if (text.length > MAX_TASK_TEXT) return `${MAX_TASK_TEXT}文字以内で入力してください。`;
+      if (data.due_date !== null && data.due_date !== undefined && !isValidDateStr(data.due_date))
+        return "期限の日付が正しくありません。";
+      return null;
+    }
     if (!data || !isValidDateStr(data.date)) return "日付を選んでください。";
     if (data.date > todayStr) return "未来の日付は保存できません。";
     if (kind === "entry") {
       if (!MOODS.some((m) => m.key === data.mood)) return "気分を選んでください。";
       if (typeof data.text !== "string") return "本文の形式が正しくありません。";
       if (data.text.trim().length > MAX_TEXT_LENGTH) return `本文は${MAX_TEXT_LENGTH}文字以内で入力してください。`;
+      const tags = data.tags || [];
+      if (!Array.isArray(tags) || tags.some((t) => !THEME_TAGS.includes(t))) return "テーマの選び方が正しくありません。";
+      return null;
+    }
+    if (kind === "photo") {
+      if (!PHOTO_MIMES.includes(data.mime)) return "対応していない画像形式です。";
+      if (!(data.size > 0)) return "写真を選んでください。";
+      if (data.size > MAX_PHOTO_BYTES) return "写真が大きすぎます。";
       return null;
     }
     if (kind === "sleep") {
@@ -151,7 +176,14 @@
   /** inbox に置く1ファイル分の中身。 */
   function buildRecord(kind, data, now, id) {
     const clean = Object.assign({}, data);
-    if (kind === "entry") clean.text = clean.text.trim();
+    if (kind === "entry") {
+      clean.text = clean.text.trim();
+      clean.tags = THEME_TAGS.filter((t) => (clean.tags || []).includes(t));
+    }
+    if (kind === "task") {
+      clean.text = String(clean.text || "").trim().split(/\s+/).join(" ");
+      clean.due_date = clean.due_date || null;
+    }
     if (kind === "expense" || kind === "income") clean.memo = (clean.memo || "").trim();
     return { format: FORMAT, v: VERSION, id: id || newId(), kind, created_at: isoWithOffset(now), data: clean };
   }
@@ -170,7 +202,14 @@
     if (record.kind === "entry") {
       const mood = MOODS.find((m) => m.key === d.mood);
       const text = d.text.length > 40 ? d.text.slice(0, 40) + "…" : d.text;
-      return `${mood ? mood.emoji : ""} ${text}`.trim();
+      const tags = (d.tags || []).map((t) => `#${t}`).join(" ");
+      return `${mood ? mood.emoji : ""} ${tags} ${text}`.replace(/\s+/g, " ").trim();
+    }
+    if (record.kind === "photo") {
+      return `写真(${Math.max(1, Math.round((d.size || 0) / 1024)).toLocaleString("ja-JP")}KB)`;
+    }
+    if (record.kind === "task") {
+      return d.due_date ? `${d.text}(期限 ${d.due_date})` : d.text;
     }
     if (record.kind === "sleep") {
       const min = sleepMinutes(d.date, d.bed_time, d.wake_time);
@@ -182,6 +221,7 @@
   return {
     FORMAT, VERSION, MAX_TEXT_LENGTH, MAX_MEMO, MAX_AMOUNT, MOODS, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
     EXPENSE_QUICK_AMOUNTS, INCOME_QUICK_AMOUNTS, SLEEP_QUALITY, KIND_LABELS, KIND_EMOJI,
+    THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT,
     localDateStr, addDays, isoWithOffset, isValidDateStr, parseHHMM, sleepMinutes, formatMinutes,
     normalizeNumber, validate, newId, buildRecord, fileName, serialize, summarize,
   };

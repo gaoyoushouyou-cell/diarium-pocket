@@ -17,7 +17,9 @@
 
   const AUTHORITY = "https://login.microsoftonline.com/consumers/oauth2/v2.0";
   const SCOPES = "Files.ReadWrite.AppFolder offline_access";
-  const GRAPH_INBOX = "https://graph.microsoft.com/v1.0/me/drive/special/approot:/inbox/";
+  const GRAPH_APPROOT = "https://graph.microsoft.com/v1.0/me/drive/special/approot:/";
+  // 書き込めるのは inbox/(日記宛て)と tasks/(カンバン宛て)だけ。読むのは outbox/ だけ。
+  const UPLOAD_FOLDERS = ["inbox", "tasks"];
   const TOKENS_KEY = "pocket.auth";
   const PKCE_KEY = "pocket.pkce";
 
@@ -167,20 +169,26 @@
     store.del(TOKENS_KEY);
   }
 
-  /** inbox/ に1ファイル作る。成功で true。サインインが要るときは "need-sign-in"。 */
-  async function upload(name, text) {
+  function forgetAccessToken() {
+    const t = store.get(TOKENS_KEY);
+    if (t) { t.accessExp = 0; store.set(TOKENS_KEY, t); }
+  }
+
+  /** inbox/ か tasks/ に1ファイル作る。成功で true。サインインが要るときは "need-sign-in"。 */
+  async function upload(name, text, folder) {
+    folder = folder || "inbox";
+    if (!UPLOAD_FOLDERS.includes(folder)) throw new Error("送り先のフォルダが正しくありません。");
     for (let attempt = 0; attempt < 2; attempt++) {
       const token = await accessToken();
       if (!token) return "need-sign-in";
       const res = await fetch(
-        `${GRAPH_INBOX}${encodeURIComponent(name)}:/content?@microsoft.graph.conflictBehavior=fail`,
+        `${GRAPH_APPROOT}${folder}/${encodeURIComponent(name)}:/content?@microsoft.graph.conflictBehavior=fail`,
         { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: text },
       );
       if (res.ok) return true;
       if (res.status === 409) return true; // 同じ名前のファイルがもうある = 前回送れていた
       if (res.status === 401 && attempt === 0) {
-        const t = store.get(TOKENS_KEY);
-        if (t) { t.accessExp = 0; store.set(TOKENS_KEY, t); }
+        forgetAccessToken();
         continue;
       }
       throw new Error(`OneDrive への保存に失敗しました (HTTP ${res.status})`);
@@ -188,5 +196,32 @@
     return "need-sign-in";
   }
 
-  root.PocketAuth = { isConfigured, redirectUri, authorizeUrl, challengeOf, signIn, handleRedirect, accessToken, status, signOut, upload };
+  /**
+   * PC が書いた outbox/pocket_today.json を読む。サインイン画面には移動しない
+   * (読めなければ手元の前回分を使えばよいので)。
+   * 戻り値: { ok: true, data } / { ok: false, reason: "need-sign-in" | "missing" | "error", message }
+   */
+  async function downloadOutbox() {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const token = await accessToken();
+      if (!token) return { ok: false, reason: "need-sign-in" };
+      // ファイル本体は別ドメインの一時URLから取る(Graph の推奨どおり)
+      const meta = await fetch(
+        `${GRAPH_APPROOT}outbox/pocket_today.json?select=id,lastModifiedDateTime,@microsoft.graph.downloadUrl`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (meta.status === 404) return { ok: false, reason: "missing" };
+      if (meta.status === 401 && attempt === 0) { forgetAccessToken(); continue; }
+      if (!meta.ok) return { ok: false, reason: "error", message: `HTTP ${meta.status}` };
+      const info = await meta.json();
+      const url = info["@microsoft.graph.downloadUrl"];
+      if (!url) return { ok: false, reason: "error", message: "ダウンロード先がありません" };
+      const res = await fetch(url);
+      if (!res.ok) return { ok: false, reason: "error", message: `HTTP ${res.status}` };
+      return { ok: true, data: await res.json() };
+    }
+    return { ok: false, reason: "need-sign-in" };
+  }
+
+  root.PocketAuth = { isConfigured, redirectUri, authorizeUrl, challengeOf, signIn, handleRedirect, accessToken, status, signOut, upload, downloadOutbox };
 })(self);

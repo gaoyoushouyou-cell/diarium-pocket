@@ -3,7 +3,7 @@
  * アプリ本体のファイルだけをキャッシュする(記録の中身はキャッシュしない)。
  * Microsoft のサインインや OneDrive への通信には一切手を出さない。
  */
-const CACHE = "pocket-2026-09-29.1";
+const CACHE = "pocket-2026-09-29.2";
 const SHELL = [
   "./", "index.html", "app.js", "core.js", "auth.js", "config.js", "manifest.webmanifest",
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
