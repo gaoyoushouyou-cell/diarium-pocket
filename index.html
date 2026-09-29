@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Diarium Pocket</title>
+  <meta name="description" content="スマホで書いて、PCの日記アプリ(Diarium)に届ける小さな日記帳">
+  <meta name="theme-color" content="#F6F3ED" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1D1F1C" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Pocket">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; connect-src 'self' https://login.microsoftonline.com https://graph.microsoft.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; form-action https://login.microsoftonline.com; base-uri 'self'">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    :root {
+      --bg: #F6F3ED; --card: #FFFFFF; --text: #2F3337; --sub: #70757A; --accent: #5E7963;
+      --accent-pale: #E7EEE8; --border: #E3DED5; --danger: #B85C5C; --amber: #E0A24E;
+      --income: #3E7C5A; --chip: #F1EEE7; --on-accent: #FFFFFF;
+      --radius: 16px; --radius-s: 12px;
+      --tabbar: calc(64px + env(safe-area-inset-bottom));
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #1D1F1C; --card: #272A26; --text: #ECEAE4; --sub: #A3A69F; --accent: #8FB394;
+        --accent-pale: #2F3A31; --border: #3A3D38; --danger: #E08A8A; --income: #7FC49A;
+        --chip: #30332E; --on-accent: #10140F;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #1D1F1C; --card: #272A26; --text: #ECEAE4; --sub: #A3A69F; --accent: #8FB394;
+      --accent-pale: #2F3A31; --border: #3A3D38; --danger: #E08A8A; --income: #7FC49A;
+      --chip: #30332E; --on-accent: #10140F;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+        "Noto Sans JP", "Yu Gothic UI", sans-serif;
+      font-size: 16px; line-height: 1.55;
+      padding: env(safe-area-inset-top) 0 var(--tabbar);
+      min-height: 100vh; overflow-x: hidden;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 16px 6px; max-width: 560px; margin: 0 auto;
+    }
+    .brand { display: flex; flex-direction: column; min-width: 0; }
+    .brand b { font-size: 20px; letter-spacing: .02em; white-space: nowrap; line-height: 1.2; }
+    .brand small { color: var(--sub); font-size: 12px; line-height: 1.3; }
+    .pill {
+      font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--chip); color: var(--sub);
+      white-space: nowrap;
+    }
+    .pill.warn { background: color-mix(in srgb, var(--amber) 22%, var(--card)); color: var(--text); }
+    main { max-width: 560px; margin: 0 auto; padding: 4px 16px 24px; }
+    section[hidden] { display: none; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px; margin: 12px 0;
+    }
+    h2 { font-size: 15px; margin: 0 0 10px; color: var(--sub); font-weight: 600; }
+    label.field { display: block; font-size: 13px; color: var(--sub); margin: 14px 0 6px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .chip {
+      border: 1px solid var(--border); background: var(--chip); color: var(--text);
+      border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 14px; min-height: 40px;
+    }
+    .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    .moods { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .mood {
+      border: 1px solid var(--border); background: var(--chip); border-radius: var(--radius-s);
+      padding: 8px 2px; font: inherit; color: var(--text); display: flex; flex-direction: column;
+      align-items: center; gap: 2px; min-height: 64px;
+    }
+    .mood span:first-child { font-size: 26px; line-height: 1.1; }
+    .mood span:last-child { font-size: 10.5px; color: var(--sub); white-space: nowrap; letter-spacing: -.02em; }
+    .mood[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-pale); box-shadow: 0 0 0 2px var(--accent) inset; }
+    .cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+    .cats .chip { border-radius: var(--radius-s); padding: 8px 6px; }
+    input, textarea {
+      width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--card);
+      border: 1px solid var(--border); border-radius: var(--radius-s); padding: 10px 12px;
+    }
+    input[type="date"], input[type="time"] { min-height: 44px; }
+    textarea { min-height: 38vh; resize: vertical; line-height: 1.7; }
+    input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+    .counter { text-align: right; font-size: 12px; color: var(--sub); margin-top: 4px; }
+    .primary {
+      width: 100%; margin-top: 16px; min-height: 50px; border: 0; border-radius: var(--radius-s);
+      background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; font-size: 16px;
+    }
+    .primary:disabled { opacity: .45; }
+    .ghost {
+      border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: var(--radius-s);
+      padding: 10px 14px; font: inherit; font-size: 14px; min-height: 44px;
+    }
+    .error { color: var(--danger); font-size: 13px; min-height: 1.2em; margin-top: 8px; }
+    .muted { color: var(--sub); font-size: 13px; }
+    .big { font-size: 28px; font-weight: 600; }
+    .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--chip); border-radius: var(--radius-s); padding: 4px; gap: 4px; }
+    .seg button { border: 0; background: transparent; font: inherit; padding: 10px; border-radius: 9px; color: var(--sub); }
+    .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .queue-item {
+      display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border);
+    }
+    .queue-item:first-child { border-top: 0; }
+    .queue-item .body { flex: 1; min-width: 0; }
+    .queue-item .body div:last-child { color: var(--sub); font-size: 13px; word-break: break-word; }
+    .x { border: 0; background: transparent; color: var(--sub); font-size: 13px; padding: 6px; min-height: 36px; }
+    nav.tabs {
+      position: fixed; left: 0; right: 0; bottom: 0; height: var(--tabbar);
+      padding-bottom: env(safe-area-inset-bottom); background: var(--card); border-top: 1px solid var(--border);
+      display: grid; grid-template-columns: repeat(4, 1fr); z-index: 10;
+    }
+    nav.tabs button {
+      border: 0; background: transparent; font: inherit; font-size: 11px; color: var(--sub);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; position: relative;
+    }
+    nav.tabs button span:first-child { font-size: 22px; line-height: 1; }
+    nav.tabs button[aria-selected="true"] { color: var(--accent); font-weight: 600; }
+    .badge {
+      position: absolute; top: 6px; left: calc(50% + 8px); background: var(--amber); color: #2B2B2B;
+      font-size: 11px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px;
+      display: none; align-items: center; justify-content: center;
+    }
+    .badge.on { display: flex; }
+    .toast {
+      position: fixed; left: 16px; right: 16px; bottom: calc(var(--tabbar) + 12px); max-width: 528px; margin: 0 auto;
+      background: var(--text); color: var(--bg); padding: 12px 14px; border-radius: var(--radius-s);
+      font-size: 14px; opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s;
+      pointer-events: none; z-index: 20;
+    }
+    .toast.on { opacity: 1; transform: none; }
+    details summary { cursor: pointer; color: var(--sub); font-size: 13px; }
+    code { font-size: 12px; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><b>Diarium Pocket</b><small>日記を、PCへ</small></div>
+    <span class="pill" id="netPill">…</span>
+  </header>
+
+  <main>
+    <!-- 日記 -->
+    <section id="tab-entry">
+      <div class="card">
+        <h2>いつの日記?</h2>
+        <div class="row" data-date-chips="entry"></div>
+        <input type="date" id="entryDate" aria-label="日付" style="margin-top:8px">
+      </div>
+      <div class="card">
+        <h2>きょうの気分</h2>
+        <div class="moods" id="moods"></div>
+        <label class="field" for="entryText">ひとこと・日記</label>
+        <textarea id="entryText" placeholder="思ったこと、あったこと。短くても大丈夫。"></textarea>
+        <div class="counter" id="entryCounter">0 / 4000</div>
+        <div class="error" id="entryError"></div>
+        <button class="primary" id="entrySave">保存して送る</button>
+        <p class="muted">PCに同じ日の日記があるときは、PCで取り込むときに「追記」か「置き換え」かを選べます。</p>
+      </div>
+    </section>
+
+    <!-- 睡眠 -->
+    <section id="tab-sleep" hidden>
+      <div class="card">
+        <h2>起きた日</h2>
+        <div class="row" data-date-chips="sleep"></div>
+        <input type="date" id="sleepDate" aria-label="起きた日" style="margin-top:8px">
+      </div>
+      <div class="card">
+        <div class="time-grid">
+          <div>
+            <label class="field" for="bedTime">寝た時刻</label>
+            <input type="time" id="bedTime">
+          </div>
+          <div>
+            <label class="field" for="wakeTime">起きた時刻</label>
+            <input type="time" id="wakeTime">
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px"><button class="ghost" id="wakeNow">☀️ いま起きた</button></div>
+        <p class="muted" style="margin-bottom:0">睡眠時間</p>
+        <div class="big" id="sleepDuration">—</div>
+        <label class="field">眠りの質(なくてもOK)</label>
+        <div class="row" id="quality"></div>
+        <div class="error" id="sleepError"></div>
+        <button class="primary" id="sleepSave">保存して送る</button>
+      </div>
+    </section>
+
+    <!-- 家計簿 -->
+    <section id="tab-money" hidden>
+      <div class="card">
+        <div class="seg" id="moneyKind">
+          <button data-kind="expense" aria-pressed="true">💸 出費</button>
+          <button data-kind="income" aria-pressed="false">💰 収入</button>
+        </div>
+        <label class="field" for="amount">金額</label>
+        <input id="amount" inputmode="numeric" autocomplete="off" placeholder="¥0">
+        <div class="row" id="quick" style="margin-top:8px"></div>
+        <label class="field">カテゴリ</label>
+        <div class="cats" id="cats"></div>
+        <label class="field" for="memo">メモ(なくてもOK)</label>
+        <input id="memo" maxlength="100" autocomplete="off">
+        <label class="field">日付</label>
+        <div class="row" data-date-chips="money"></div>
+        <input type="date" id="moneyDate" aria-label="日付" style="margin-top:8px">
+        <div class="error" id="moneyError"></div>
+        <button class="primary" id="moneySave">保存して送る</button>
+      </div>
+    </section>
+
+    <!-- 送る -->
+    <section id="tab-send" hidden>
+      <div class="card">
+        <h2>OneDrive</h2>
+        <div id="account"></div>
+      </div>
+      <div class="card">
+        <h2>まだ送っていない記録</h2>
+        <div id="queue"></div>
+        <div class="error" id="sendError"></div>
+        <button class="primary" id="sendAll">OneDriveへ送る</button>
+        <button class="ghost" id="shareAll" style="width:100%;margin-top:8px">共有シートで「ファイルに保存」する</button>
+        <p class="muted">送った記録は、PCで日記アプリを開いたときに確認してから取り込まれます。送ったあとは、この端末から本文を消します。</p>
+      </div>
+      <div class="card">
+        <h2>送った記録(本文は残していません)</h2>
+        <div id="sent" class="muted"></div>
+      </div>
+      <div class="card">
+        <details>
+          <summary>このアプリについて</summary>
+          <p class="muted">書いた内容は、送るまでこの端末の中だけに保存されます。送り先は、あなたの OneDrive の「アプリ/Diarium Pocket/inbox」だけです。</p>
+          <p class="muted">リダイレクトURI: <code id="redirectUri"></code></p>
+          <p class="muted" id="version"></p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="entry" aria-selected="true"><span>📔</span><span>日記</span></button>
+    <button role="tab" data-tab="sleep" aria-selected="false"><span>🛏️</span><span>睡眠</span></button>
+    <button role="tab" data-tab="money" aria-selected="false"><span>💴</span><span>家計簿</span></button>
+    <button role="tab" data-tab="send" aria-selected="false"><span>📤</span><span>送る</span><i class="badge" id="badge"></i></button>
+  </nav>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="config.js"></script>
+  <script src="core.js"></script>
+  <script src="auth.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
