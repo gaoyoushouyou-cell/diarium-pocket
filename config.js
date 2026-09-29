@@ -5,5 +5,5 @@
  * クライアントIDは秘密の値ではない(公開してよい)。
  */
 window.POCKET_CONFIG = {
-  clientId: "",
+  clientId: "671a323c-fe3e-4674-8b24-718cda4d25df",
 };
