@@ -82,6 +82,10 @@
     .mood[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-pale); box-shadow: 0 0 0 2px var(--accent) inset; }
     .cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
     .cats .chip { border-radius: var(--radius-s); padding: 8px 6px; }
+    select {
+      width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--card);
+      border: 1px solid var(--border); border-radius: var(--radius-s); padding: 10px 12px; min-height: 44px;
+    }
     input, textarea {
       width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--card);
       border: 1px solid var(--border); border-radius: var(--radius-s); padding: 10px 12px;
@@ -116,7 +120,7 @@
     nav.tabs {
       position: fixed; left: 0; right: 0; bottom: 0; height: var(--tabbar);
       padding-bottom: env(safe-area-inset-bottom); background: var(--card); border-top: 1px solid var(--border);
-      display: grid; grid-template-columns: repeat(5, 1fr); z-index: 10;
+      display: grid; grid-template-columns: repeat(6, 1fr); z-index: 10;
     }
     nav.tabs button {
       border: 0; background: transparent; font: inherit; font-size: 11px; color: var(--sub);
@@ -187,6 +191,9 @@
                placeholder="例) レポート提出 #学校 !高">
         <div class="row" id="taskDue" style="margin-top:8px"></div>
         <input type="date" id="taskDueDate" aria-label="期限" style="margin-top:8px" hidden>
+        <label class="field">カテゴリ</label>
+        <div class="tags" id="taskCats"></div>
+        <p class="muted" id="taskCatsNote" style="margin:4px 0 0" hidden>PCでランチャーを起動すると、カンバンのカテゴリから選べるようになります。</p>
         <p class="muted" style="margin:6px 0 0">PCのカンバンと同じ書き方(#タグ @カテゴリ !高 明日)も使えます。「明日」は今日から数えます。</p>
         <div class="error" id="taskError"></div>
         <button class="primary" id="taskSave">追加して送る</button>
@@ -233,6 +240,21 @@
         <div class="error" id="entryError"></div>
         <button class="primary" id="entrySave">保存して送る</button>
         <p class="muted">PCに同じ日の日記があるときは、PCで取り込むときに「追記」か「置き換え」かを選べます。</p>
+      </div>
+    </section>
+
+    <!-- メモ(既存のメモの末尾に追記) -->
+    <section id="tab-memo" hidden>
+      <div class="card">
+        <h2>どのメモに追記する?</h2>
+        <select id="memoTarget" aria-label="追記するメモ"></select>
+        <p class="muted" id="memoTargetNote" style="margin:6px 0 0"></p>
+        <label class="field" for="memoText">追記する内容</label>
+        <textarea id="memoText" style="min-height:30vh" placeholder="思いついたこと、買いたいもの、アイデア…"></textarea>
+        <div class="counter" id="memoCounter">0 / 4000</div>
+        <div class="error" id="memoError"></div>
+        <button class="primary" id="memoSave">追記して送る</button>
+        <p class="muted">PCでメモアプリを開くと、選んだメモの末尾に「— スマホから 日時 —」の区切りつきで足されます(確認してから)。</p>
       </div>
     </section>
 
@@ -322,6 +344,7 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="today" aria-selected="false"><span>🗓️</span><span>今日</span></button>
     <button role="tab" data-tab="entry" aria-selected="true"><span>📔</span><span>日記</span></button>
+    <button role="tab" data-tab="memo" aria-selected="false"><span>📝</span><span>メモ</span></button>
     <button role="tab" data-tab="sleep" aria-selected="false"><span>🛏️</span><span>睡眠</span></button>
     <button role="tab" data-tab="money" aria-selected="false"><span>💴</span><span>家計簿</span></button>
     <button role="tab" data-tab="send" aria-selected="false"><span>📤</span><span>送る</span><i class="badge" id="badge"></i></button>

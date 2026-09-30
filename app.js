@@ -19,7 +19,7 @@
 
   const C = window.PocketCore;
   const A = window.PocketAuth;
-  const APP_VERSION = "2026-09-29.2";
+  const APP_VERSION = "2026-09-30.2";
 
   const KEYS = {
     queue: "pocket.queue",
@@ -28,8 +28,9 @@
     prefs: "pocket.prefs",
     outbox: "pocket.outbox",
     outboxCheckedAt: "pocket.outbox.checkedAt",
+    memoDraft: "pocket.draft.memo",
   };
-  const TABS = ["today", "entry", "sleep", "money", "send"];
+  const TABS = ["today", "entry", "memo", "sleep", "money", "send"];
   const MAX_SENT_LOG = 30;
   const OUTBOX_REFRESH_MS = 10 * 60 * 1000;
   const DRAFT_PHOTO_KEY = "draft-photo";
@@ -58,8 +59,13 @@
     try { localStorage.removeItem(key); } catch (_) { /* noop */ }
   }
 
-  // ---------- 写真の置き場(IndexedDB) ----------
+  // ---------- 写真の置き場 ----------
+  // iPhone の Safari(とくにホーム画面から開いたアプリ)は、IndexedDB に Blob を
+  // そのまま入れると失敗したり、読み出すと空になったりすることがある。
+  // そこで画像は ArrayBuffer にしてから入れ、入れた直後に読み戻して大きさを確かめる。
+  // それでもだめなら localStorage に base64 で入れる(縮小後の写真は数百KBなので入る)。
   const Photos = (function () {
+    const LS_PREFIX = "pocket.photo.";
     let dbPromise = null;
     function open() {
       if (dbPromise) return dbPromise;
@@ -83,17 +89,74 @@
         tx.onabort = () => reject(tx.error || new Error("保存を中止しました"));
       });
     }
+    async function toBuffer(blob) {
+      if (blob.arrayBuffer) return blob.arrayBuffer();
+      return new Response(blob).arrayBuffer();
+    }
+    async function idbGet(key) {
+      const v = await run("readonly", (s) => s.get(key));
+      if (!v) return null;
+      if (v instanceof Blob) return v.size ? v : null; // 以前の版で入れた形
+      if (v.buf) return new Blob([v.buf], { type: v.type || "image/jpeg" });
+      return null;
+    }
+    async function idbPut(key, blob) {
+      const buf = await toBuffer(blob);
+      await run("readwrite", (s) => s.put({ type: blob.type || "image/jpeg", buf }, key));
+      const back = await idbGet(key);
+      if (!back || back.size !== blob.size) throw new Error("読み戻した写真の大きさが一致しません");
+    }
+    function lsGet(key) {
+      try {
+        const v = JSON.parse(localStorage.getItem(LS_PREFIX + key) || "null");
+        if (!v || !v.b64) return null;
+        const bin = atob(v.b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return new Blob([arr], { type: v.type || "image/jpeg" });
+      } catch (_) {
+        return null;
+      }
+    }
+    function lsDel(key) {
+      try { localStorage.removeItem(LS_PREFIX + key); } catch (_) { /* noop */ }
+    }
     return {
-      put: (key, blob) => run("readwrite", (s) => s.put(blob, key)),
-      get: (key) => run("readonly", (s) => s.get(key)),
-      del: (key) => run("readwrite", (s) => s.delete(key)).catch(() => {}),
-      available: () => open().then(() => true, () => false),
+      /** 保存して、どこに入れたか("idb" / "local")を返す。どこにも入らなければ例外。 */
+      async put(key, blob) {
+        try {
+          await idbPut(key, blob);
+          lsDel(key);
+          return "idb";
+        } catch (_) {
+          try { await run("readwrite", (s) => s.delete(key)); } catch (__) { /* noop */ }
+          const b64 = await blobToBase64(blob);
+          try {
+            localStorage.setItem(LS_PREFIX + key, JSON.stringify({ type: blob.type || "image/jpeg", b64 }));
+            return "local";
+          } catch (__) {
+            throw new Error("写真をこの端末に保存できませんでした(空き容量を確認してください)。");
+          }
+        }
+      },
+      async get(key) {
+        let blob = null;
+        try { blob = await idbGet(key); } catch (_) { blob = null; }
+        return blob || lsGet(key);
+      },
+      async del(key) {
+        try { await run("readwrite", (s) => s.delete(key)); } catch (_) { /* noop */ }
+        lsDel(key);
+      },
     };
   })();
 
   const $ = (id) => document.getElementById(id);
   const today = () => C.localDateStr(new Date());
-  const prefs = Object.assign({ bedTime: "", category: {}, lastTab: "today" }, load(KEYS.prefs, {}));
+  const prefs = Object.assign(
+    { bedTime: "", category: {}, lastTab: "today", taskCategoryId: null, memoNoteId: null },
+    load(KEYS.prefs, {}),
+  );
   const savePrefs = () => save(KEYS.prefs, prefs);
   const pad = (n) => String(n).padStart(2, "0");
 
@@ -130,8 +193,9 @@
     prefs.lastTab = name;
     savePrefs();
     if (name === "send") renderSend();
-    if (name === "today") renderToday();
+    if (name === "today") { renderToday(); renderTaskCats(); }
     if (name === "sleep") renderSleepHistory();
+    if (name === "memo") renderMemoTargets();
     window.scrollTo(0, 0);
   }
   document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -200,8 +264,31 @@
   $("taskDueDate").addEventListener("change", () => { taskDue = $("taskDueDate").value || null; syncDue(); });
   syncDue();
 
+  // ---------- タスクのカテゴリ(PC から届いた Todo 列の一覧から選ぶ) ----------
+  function taskCategories() {
+    const ob = outbox();
+    return (ob && ob.tasks && Array.isArray(ob.tasks.categories)) ? ob.tasks.categories : [];
+  }
+  function renderTaskCats() {
+    const cats = taskCategories();
+    const box = $("taskCats");
+    box.replaceChildren();
+    $("taskCatsNote").hidden = cats.length > 0;
+    if (prefs.taskCategoryId && !cats.some((c) => c.id === prefs.taskCategoryId)) prefs.taskCategoryId = null;
+    const choices = [{ id: null, name: "おまかせ" }].concat(cats);
+    choices.forEach((c) => {
+      const b = el("button", { class: "chip", type: "button", "aria-pressed": String(c.id === prefs.taskCategoryId), text: c.name });
+      b.addEventListener("click", () => { prefs.taskCategoryId = c.id; savePrefs(); renderTaskCats(); });
+      box.append(b);
+    });
+  }
+
   function saveTask() {
-    const data = { text: $("taskText").value, due_date: taskDue };
+    const cat = taskCategories().find((c) => c.id === prefs.taskCategoryId) || null;
+    const data = {
+      text: $("taskText").value, due_date: taskDue,
+      category_id: cat ? cat.id : null, category: cat ? cat.name : null,
+    };
     if (!enqueue("task", data, $("taskError"))) return;
     $("taskText").value = "";
     taskDue = null;
@@ -343,6 +430,8 @@
       if (r.ok && r.data && r.data.format === "diarium-pocket-outbox") {
         save(KEYS.outbox, r.data);
         renderToday();
+        renderTaskCats();
+        renderMemoTargets();
         renderSleepHistory();
         if (interactive) toast("PCの最新の情報にしました");
       } else if (r.reason === "missing") {
@@ -463,40 +552,77 @@
   }
 
   $("photoPick").addEventListener("click", () => $("photoInput").click());
-  $("photoInput").addEventListener("change", async () => {
+  // 写真の縮小が終わる前に「保存」を押されても写真が抜け落ちないよう、処理中の約束を覚えておく
+  let photoPending = null;
+  $("photoInput").addEventListener("change", () => {
     const file = $("photoInput").files && $("photoInput").files[0];
     $("photoInput").value = "";
     if (!file) return;
     $("entryError").textContent = "";
     $("photoPick").textContent = "📷 小さくしています…";
-    try {
-      const blob = await shrinkPhoto(file);
-      showPhoto(blob);
-      try { await Photos.put(DRAFT_PHOTO_KEY, blob); } catch (_) { /* 下書きに残せなくても、このまま保存はできる */ }
-    } catch (e) {
-      showPhoto(draftPhoto);
-      $("entryError").textContent = e.message || "写真を読み込めませんでした。";
-    }
+    const job = (async () => {
+      try {
+        const blob = await shrinkPhoto(file);
+        showPhoto(blob);
+        try { await Photos.put(DRAFT_PHOTO_KEY, blob); } catch (_) { /* 下書きに残せなくても、このまま保存はできる */ }
+      } catch (e) {
+        showPhoto(draftPhoto);
+        $("entryError").textContent = e.message || "写真を読み込めませんでした。";
+      }
+    })();
+    photoPending = job;
+    job.finally(() => { if (photoPending === job) photoPending = null; });
   });
   $("photoRemove").addEventListener("click", () => { showPhoto(null); Photos.del(DRAFT_PHOTO_KEY); });
 
+  let entrySaving = false;
   $("entrySave").addEventListener("click", async () => {
+    if (entrySaving) return;
+    entrySaving = true;
+    const label = $("entrySave").textContent;
+    try {
+      if (photoPending) {
+        $("entrySave").textContent = "写真を準備しています…";
+        $("entrySave").disabled = true;
+        await photoPending;
+      }
+      await saveEntry();
+    } finally {
+      entrySaving = false;
+      $("entrySave").textContent = label;
+      $("entrySave").disabled = false;
+    }
+  });
+
+  async function saveEntry() {
     const data = { date: dateInputs.entry.value, mood: entryMood, text: $("entryText").value, tags: [...entryTags] };
     const photo = draftPhoto;
     if (photo) {
       const problem = C.validate("photo", { date: data.date, mime: "image/jpeg", size: photo.size }, today());
       if (problem) { $("entryError").textContent = problem; return; }
     }
-    if (!enqueue("entry", data, $("entryError"), { quiet: !!photo })) return;
+    const entryProblem = C.validate("entry", data, today());
+    if (entryProblem) { $("entryError").textContent = entryProblem; return; }
+    let photoRec = null;
     if (photo) {
-      const rec = C.buildRecord("photo", { date: data.date, mime: "image/jpeg", size: photo.size }, new Date());
+      // 写真を先に端末へしまう。しまえなければ日記も保存せず、写真を残したまま知らせる
+      photoRec = C.buildRecord("photo", { date: data.date, mime: "image/jpeg", size: photo.size }, new Date());
       try {
-        await Photos.put(rec.id, photo);
-        enqueueRecord(rec, $("entryError"), { quiet: true });
-        toast("日記と写真を保存しました");
-      } catch (_) {
-        toast("日記は保存しました。写真はこの端末に保存できませんでした");
+        await Photos.put(photoRec.id, photo);
+      } catch (e) {
+        $("entryError").textContent = `${e.message} 日記はまだ保存していません。写真を外すか、もう一度お試しください。`;
+        return;
       }
+    }
+    // 日記と写真を同じ回で送れるよう、両方をキューに入れてから送信を始める
+    const records = [C.buildRecord("entry", data, new Date())];
+    if (photoRec) records.push(photoRec);
+    if (!enqueueRecords(records, $("entryError"))) {
+      if (photoRec) Photos.del(photoRec.id);
+      return;
+    }
+    toast(photoRec ? "日記と写真を保存しました" : "日記を保存しました");
+    if (photo) {
       Photos.del(DRAFT_PHOTO_KEY);
       showPhoto(null);
     }
@@ -509,6 +635,60 @@
     syncMoods();
     syncTags();
     updateCounter();
+  }
+
+  // =====================================================================
+  // メモ(既存のメモを選んで追記する)
+  // =====================================================================
+  function memoNotes() {
+    const ob = outbox();
+    return (ob && ob.memos && ob.memos.available && Array.isArray(ob.memos.notes)) ? ob.memos.notes : [];
+  }
+  function renderMemoTargets() {
+    const notes = memoNotes();
+    const sel = $("memoTarget");
+    sel.replaceChildren();
+    if (!notes.length) {
+      sel.append(el("option", { value: "", text: "(メモの一覧がまだ届いていません)" }));
+      sel.disabled = true;
+      $("memoTargetNote").textContent = "PCでランチャーを起動すると、メモアプリのメモから選べるようになります。";
+      $("memoSave").disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    $("memoSave").disabled = false;
+    if (!notes.some((n) => n.id === prefs.memoNoteId)) prefs.memoNoteId = notes[0].id;
+    notes.forEach((n) => {
+      const tags = (n.tags || []).length ? `  ${n.tags.map((t) => "#" + t).join(" ")}` : "";
+      const opt = el("option", { value: n.id, text: (n.title || "(タイトルなし)") + tags });
+      if (n.id === prefs.memoNoteId) opt.selected = true;
+      sel.append(opt);
+    });
+    const ob = outbox();
+    const gen = ob ? new Date(ob.generated_at) : null;
+    $("memoTargetNote").textContent = gen && !isNaN(gen)
+      ? `メモの一覧: PCで ${gen.getMonth() + 1}/${gen.getDate()} ${pad(gen.getHours())}:${pad(gen.getMinutes())} に更新(「今日」タブの「更新」で最新に)`
+      : "";
+  }
+  $("memoTarget").addEventListener("change", () => { prefs.memoNoteId = $("memoTarget").value || null; savePrefs(); });
+  function updateMemoCounter() {
+    const n = $("memoText").value.trim().length;
+    $("memoCounter").textContent = `${n} / ${C.MAX_MEMO_TEXT}`;
+    $("memoCounter").style.color = n > C.MAX_MEMO_TEXT ? "var(--danger)" : "";
+  }
+  $("memoText").addEventListener("input", () => {
+    updateMemoCounter();
+    save(KEYS.memoDraft, $("memoText").value);
+  });
+  $("memoText").value = load(KEYS.memoDraft, "") || "";
+  updateMemoCounter();
+  $("memoSave").addEventListener("click", () => {
+    const note = memoNotes().find((n) => n.id === $("memoTarget").value);
+    const data = { note_id: note ? note.id : "", note_title: note ? note.title : "", text: $("memoText").value };
+    if (!enqueue("memo", data, $("memoError"))) return;
+    $("memoText").value = "";
+    drop(KEYS.memoDraft);
+    updateMemoCounter();
   });
 
   // =====================================================================
@@ -645,18 +825,23 @@
   // =====================================================================
   function queue() { return load(KEYS.queue, []); }
   const recDate = (r) => r.data.date || String(r.created_at).slice(0, 10);
-  const folderFor = (r) => (r.kind === "task" ? "tasks" : "inbox");
+  const folderFor = (r) => C.folderFor(r.kind);
 
-  function enqueueRecord(record, errorEl, opts) {
+  function enqueueRecords(records, errorEl) {
     const q = queue();
-    q.push(record);
+    q.push(...records);
     if (!save(KEYS.queue, q)) {
       errorEl.textContent = "この端末に保存できませんでした。ストレージの空きを確認してください。";
       return false;
     }
     updateBadge();
-    if (!(opts && opts.quiet)) toast(`${C.KIND_LABELS[record.kind]}を保存しました`);
     trySendQuietly();
+    return true;
+  }
+
+  function enqueueRecord(record, errorEl, opts) {
+    if (!enqueueRecords([record], errorEl)) return false;
+    if (!(opts && opts.quiet)) toast(`${C.KIND_LABELS[record.kind]}を保存しました`);
     return true;
   }
 
@@ -696,7 +881,7 @@
     const n = queue().length;
     if (!storageOk) { pill.textContent = "端末に保存できません"; pill.className = "pill warn"; return; }
     if (!navigator.onLine) { pill.textContent = n ? `オフライン・未送信 ${n}` : "オフライン"; pill.className = "pill warn"; return; }
-    pill.textContent = n ? `未送信 ${n}` : "すべて送信済み";
+    pill.textContent = n ? (lastProblems.length ? `送れない記録あり・未送信 ${n}` : `未送信 ${n}`) : "すべて送信済み";
     pill.className = n ? "pill warn" : "pill";
   }
 
@@ -721,8 +906,11 @@
 
   // ---------- 送信 ----------
   let sending = false;
+  let sendAgain = false; // 送信中に新しい記録が入ったら、終わってからもう一度送る
+  let lastProblems = [];
   async function sendAll(interactive) {
-    if (sending) return;
+    if (sending) { sendAgain = true; return; }
+    sendAgain = false;
     const items = queue();
     if (!items.length) { if (interactive) toast("送る記録はありません"); return; }
     if (!A.isConfigured()) { if (interactive) toast("OneDriveの設定がまだです。共有シートで保存してください"); return; }
@@ -766,7 +954,14 @@
       markSent(done, "onedrive");
       toast(`${done.length}件をOneDriveへ送りました`);
     }
-    if (problems.length) $("sendError").textContent = problems.join("\n");
+    lastProblems = problems;
+    $("sendError").textContent = problems.join("\n");
+    updatePill();
+    if (problems.length && !interactive) setTimeout(() => toast("送れなかった記録があります(「送る」タブで確認できます)"), 2900);
+    if (sendAgain) {
+      sendAgain = false;
+      setTimeout(() => sendAll(false), 0);
+    }
     if (!$("tab-send").hidden) renderSend();
     if (!$("tab-today").hidden) renderToday();
   }
@@ -842,7 +1037,7 @@
       list.append(el("div", { class: "queue-item" }, [
         el("div", { text: C.KIND_EMOJI[r.kind] || "・" }),
         el("div", { class: "body" }, [
-          el("div", { text: r.kind === "task" ? `${C.KIND_LABELS[r.kind]}(${recDate(r)}に追加)` : `${C.KIND_LABELS[r.kind]}・${recDate(r)}` }),
+          el("div", { text: (r.kind === "task" || r.kind === "memo") ? `${C.KIND_LABELS[r.kind]}(${recDate(r)}に書いたもの)` : `${C.KIND_LABELS[r.kind]}・${recDate(r)}` }),
           el("div", { text: C.summarize(r) }),
         ]),
         el("button", {
@@ -851,12 +1046,13 @@
         }),
       ]));
     });
+    $("sendError").textContent = lastProblems.join("\n");
     $("sendAll").disabled = !q.length || st.state === "unconfigured";
     $("shareAll").disabled = !q.length;
     const sent = load(KEYS.sent, []);
     $("sent").replaceChildren(...(sent.length ? sent.slice(0, 10).map((s) => {
       const at = s.sent_at.slice(5, 16).replace("-", "/").replace("T", " ");
-      const what = s.kind === "task" ? "タスク" : `${C.KIND_LABELS[s.kind] || s.kind}(${s.date}の分)`;
+      const what = (s.kind === "task" || s.kind === "memo") ? C.KIND_LABELS[s.kind] : `${C.KIND_LABELS[s.kind] || s.kind}(${s.date}の分)`;
       return el("div", { text: `${at} ${C.KIND_EMOJI[s.kind] || ""} ${what}${s.via === "share" ? "・共有シート" : ""}` });
     }) : [el("span", { text: "まだありません。" })]));
     $("redirectUri").textContent = A.redirectUri();
@@ -876,24 +1072,34 @@
     if (!$("tab-sleep").hidden) renderSleepHistory();
     trySendQuietly();
     refreshOutboxIfOld();
+    checkForUpdate();
   });
+
+  // ---------- 新しい版の受け取り ----------
+  // 新しい版のサービスワーカーが入ったら、一度だけ読み直して新しい版に切り替える
+  // (最初に入れたとき=前の版が無いときは読み直さない)。
+  let swRegistration = null;
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register("sw.js").then((reg) => { swRegistration = reg; }).catch(() => {});
+  }
+  function checkForUpdate() {
+    if (swRegistration && navigator.onLine) swRegistration.update().catch(() => {});
+  }
 
   (async function boot() {
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+    registerServiceWorker();
     updateBadge();
     // 写真が使えない端末(IndexedDB 無し)では、写真のボタンだけ使えなくする
-    Photos.available().then(async (ok) => {
-      if (!ok) {
-        $("photoPick").disabled = true;
-        $("photoNote").textContent = "この端末では写真を保存できないため、写真は添えられません。";
-        return;
-      }
-      try {
-        const blob = await Photos.get(DRAFT_PHOTO_KEY);
-        if (blob) showPhoto(blob);
-      } catch (_) { /* 下書きの写真が読めなくても続ける */ }
-    });
+    Photos.get(DRAFT_PHOTO_KEY).then((blob) => { if (blob) showPhoto(blob); }).catch(() => { /* 読めなくても続ける */ });
     const r = await A.handleRedirect();
     if (r.handled) {
       if (r.error) { showTab("send"); $("sendError").textContent = r.error; return; }

@@ -53,8 +53,12 @@
   const PHOTO_MIMES = ["image/jpeg", "image/png", "image/webp"];
   const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
   const MAX_TASK_TEXT = 300;
-  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク" };
-  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅" };
+  const MAX_MEMO_TEXT = 4000;
+  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク", memo: "メモ" };
+  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅", memo: "📝" };
+  // 送り先のフォルダ(OneDrive の「アプリ/Diarium Pocket/」の中)
+  const FOLDER_FOR = { task: "tasks", memo: "memos" };
+  const folderFor = (kind) => FOLDER_FOR[kind] || "inbox";
 
   const pad = (n) => String(n).padStart(2, "0");
 
@@ -129,6 +133,16 @@
       if (text.length > MAX_TASK_TEXT) return `${MAX_TASK_TEXT}文字以内で入力してください。`;
       if (data.due_date !== null && data.due_date !== undefined && !isValidDateStr(data.due_date))
         return "期限の日付が正しくありません。";
+      const cid = data.category_id;
+      if (cid !== null && cid !== undefined && !(Number.isInteger(cid) && cid > 0)) return "カテゴリの選び方が正しくありません。";
+      return null;
+    }
+    if (kind === "memo") {
+      // 追記先のメモ(PC から届いた一覧の ID)と、足す文章
+      const text = String((data && data.text) || "").trim();
+      if (!data || typeof data.note_id !== "string" || !data.note_id) return "追記するメモを選んでください。";
+      if (!text) return "追記する内容を入力してください。";
+      if (text.length > MAX_MEMO_TEXT) return `${MAX_MEMO_TEXT}文字以内で入力してください。`;
       return null;
     }
     if (!data || !isValidDateStr(data.date)) return "日付を選んでください。";
@@ -183,6 +197,12 @@
     if (kind === "task") {
       clean.text = String(clean.text || "").trim().split(/\s+/).join(" ");
       clean.due_date = clean.due_date || null;
+      clean.category_id = Number.isInteger(clean.category_id) ? clean.category_id : null;
+      clean.category = clean.category_id ? String(clean.category || "") || null : null;
+    }
+    if (kind === "memo") {
+      clean.text = String(clean.text || "").trim();
+      clean.note_title = String(clean.note_title || "");
     }
     if (kind === "expense" || kind === "income") clean.memo = (clean.memo || "").trim();
     return { format: FORMAT, v: VERSION, id: id || newId(), kind, created_at: isoWithOffset(now), data: clean };
@@ -209,7 +229,12 @@
       return `写真(${Math.max(1, Math.round((d.size || 0) / 1024)).toLocaleString("ja-JP")}KB)`;
     }
     if (record.kind === "task") {
-      return d.due_date ? `${d.text}(期限 ${d.due_date})` : d.text;
+      const where = d.category ? ` @${d.category}` : "";
+      return (d.due_date ? `${d.text}(期限 ${d.due_date})` : d.text) + where;
+    }
+    if (record.kind === "memo") {
+      const text = d.text.length > 40 ? d.text.slice(0, 40) + "…" : d.text;
+      return `→ ${d.note_title || "(メモ)"}: ${text}`;
     }
     if (record.kind === "sleep") {
       const min = sleepMinutes(d.date, d.bed_time, d.wake_time);
@@ -221,7 +246,7 @@
   return {
     FORMAT, VERSION, MAX_TEXT_LENGTH, MAX_MEMO, MAX_AMOUNT, MOODS, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
     EXPENSE_QUICK_AMOUNTS, INCOME_QUICK_AMOUNTS, SLEEP_QUALITY, KIND_LABELS, KIND_EMOJI,
-    THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT,
+    THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT, MAX_MEMO_TEXT, folderFor,
     localDateStr, addDays, isoWithOffset, isValidDateStr, parseHHMM, sleepMinutes, formatMinutes,
     normalizeNumber, validate, newId, buildRecord, fileName, serialize, summarize,
   };
