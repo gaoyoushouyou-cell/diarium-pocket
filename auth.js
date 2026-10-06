@@ -18,8 +18,9 @@
   const AUTHORITY = "https://login.microsoftonline.com/consumers/oauth2/v2.0";
   const SCOPES = "Files.ReadWrite.AppFolder offline_access";
   const GRAPH_APPROOT = "https://graph.microsoft.com/v1.0/me/drive/special/approot:/";
-  // 書き込めるのは inbox/(日記宛て)・tasks/(カンバン宛て)・memos/(メモ宛て)だけ。読むのは outbox/ だけ。
-  const UPLOAD_FOLDERS = ["inbox", "tasks", "memos"];
+  // 書き込めるのは inbox/(日記宛て)・tasks/(カンバン宛て)・memos/(メモ宛て)・study/(勉強時間。予定表・ランチャーが
+  // 確認なしで取り込む)だけ。読むのは outbox/ だけ。
+  const UPLOAD_FOLDERS = ["inbox", "tasks", "memos", "study"];
   const TOKENS_KEY = "pocket.auth";
   const PKCE_KEY = "pocket.pkce";
 

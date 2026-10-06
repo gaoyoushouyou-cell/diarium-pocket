@@ -54,10 +54,13 @@
   const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
   const MAX_TASK_TEXT = 300;
   const MAX_MEMO_TEXT = 4000;
-  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク", memo: "メモ" };
-  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅", memo: "📝" };
+  // 勉強時間(PC の予定表アプリ destinate_app/study_core.py と同じ上限。1回の記録は 0〜960 分)
+  const MAX_STUDY_MINUTES = 16 * 60;
+  const STUDY_QUICK_MINUTES = [30, 60, 90, 120];
+  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク", memo: "メモ", study: "勉強時間" };
+  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅", memo: "📝", study: "📚" };
   // 送り先のフォルダ(OneDrive の「アプリ/Diarium Pocket/」の中)
-  const FOLDER_FOR = { task: "tasks", memo: "memos" };
+  const FOLDER_FOR = { task: "tasks", memo: "memos", study: "study" };
   const folderFor = (kind) => FOLDER_FOR[kind] || "inbox";
 
   const pad = (n) => String(n).padStart(2, "0");
@@ -147,6 +150,13 @@
     }
     if (!data || !isValidDateStr(data.date)) return "日付を選んでください。";
     if (data.date > todayStr) return "未来の日付は保存できません。";
+    if (kind === "study") {
+      // 0 分も「勉強しなかったと報告した」として記録できる(未報告とは別)
+      if (!Number.isInteger(data.minutes)) return "分を数字で入力してください。";
+      if (data.minutes < 0 || data.minutes > MAX_STUDY_MINUTES) return `1回の記録は0〜${MAX_STUDY_MINUTES}分です。`;
+      if (data.source !== undefined && data.source !== null && data.source !== "timer") return "記録の種類が正しくありません。";
+      return null;
+    }
     if (kind === "entry") {
       if (!MOODS.some((m) => m.key === data.mood)) return "気分を選んでください。";
       if (typeof data.text !== "string") return "本文の形式が正しくありません。";
@@ -180,6 +190,53 @@
     return "記録の種類が正しくありません。";
   }
 
+  /**
+   * 直近 n 日(既定7日)の勉強時間。PC から届いた集計(outbox の study)に、
+   * まだ PC に届いていないスマホの記録(local: [{id, date, minutes}])を足して見せる。
+   * PC の記録 ID(record_ids)に入っている記録は、もう PC の集計に入っているので足さない。
+   * 勉強できる時間は PC が計算した値だけを使う(分からない日があれば割合は出さない)。
+   */
+  function studyWindow(outboxStudy, local, todayStr, n) {
+    n = n || 7;
+    const ob = outboxStudy && outboxStudy.available ? outboxStudy : null;
+    const known = new Set((ob && ob.record_ids) || []);
+    const pending = (local || []).filter((r) => r && !known.has(r.id) && isValidDateStr(r.date) && Number.isInteger(r.minutes));
+    const byDate = {};
+    ((ob && ob.days) || []).forEach((d) => { byDate[d.date] = d; });
+    const localByDate = {};
+    pending.forEach((r) => { localByDate[r.date] = (localByDate[r.date] || 0) + r.minutes; });
+    let start = ob && ob.tracking_start ? ob.tracking_start : null;
+    pending.forEach((r) => { if (!start || r.date < start) start = r.date; });
+    const days = [];
+    let total = 0, cap = 0, capKnown = true, todayReported = 0;
+    for (let k = n - 1; k >= 0; k--) {
+      const ds = addDays(todayStr, -k);
+      const o = byDate[ds];
+      let reported = o && o.reported_minutes !== null && o.reported_minutes !== undefined ? o.reported_minutes : null;
+      if (localByDate[ds] !== undefined) reported = (reported || 0) + localByDate[ds];
+      let capacity = null;
+      if (o) capacity = (ds === todayStr && ob.today === todayStr) ? o.capacity_minutes : o.capacity_full_minutes;
+      if (capacity === undefined) capacity = null;
+      const counted = !!start && ds >= start;
+      if (counted) {
+        total += reported || 0;
+        if (capacity === null) capKnown = false; else cap += capacity;
+      }
+      if (ds === todayStr) todayReported = reported || 0;
+      days.push({ date: ds, reported, capacity, counted, rest: !!(o && o.rest_day) });
+    }
+    return {
+      days, total, capacity: capKnown ? cap : null,
+      ratio: capKnown && cap > 0 ? total / cap : null,
+      trackingStart: start, todayReported, pending: pending.length,
+    };
+  }
+
+  /** 計測の開始(ms)から終了(ms)までの分(四捨五入。負にはしない)。 */
+  function elapsedMinutes(startMs, endMs) {
+    return Math.max(0, Math.round((endMs - startMs) / 60000));
+  }
+
   function newId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
     const bytes = new Uint8Array(16);
@@ -205,6 +262,11 @@
       clean.note_title = String(clean.note_title || "");
     }
     if (kind === "expense" || kind === "income") clean.memo = (clean.memo || "").trim();
+    if (kind === "study") {
+      const out = { date: clean.date, minutes: clean.minutes };
+      if (clean.source === "timer") out.source = "timer";
+      return { format: FORMAT, v: VERSION, id: id || newId(), kind, created_at: isoWithOffset(now), data: out };
+    }
     return { format: FORMAT, v: VERSION, id: id || newId(), kind, created_at: isoWithOffset(now), data: clean };
   }
 
@@ -240,13 +302,17 @@
       const min = sleepMinutes(d.date, d.bed_time, d.wake_time);
       return `${d.bed_time} → ${d.wake_time}${min !== null ? `(${formatMinutes(min)})` : ""}`;
     }
+    if (record.kind === "study") {
+      return `${d.date.slice(5).replace("-", "/")} に ${formatMinutes(d.minutes)}${d.source === "timer" ? "(計測)" : ""}`;
+    }
     return `¥${d.amount.toLocaleString("ja-JP")} ${d.category}${d.memo ? `(${d.memo})` : ""}`;
   }
 
   return {
     FORMAT, VERSION, MAX_TEXT_LENGTH, MAX_MEMO, MAX_AMOUNT, MOODS, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
     EXPENSE_QUICK_AMOUNTS, INCOME_QUICK_AMOUNTS, SLEEP_QUALITY, KIND_LABELS, KIND_EMOJI,
-    THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT, MAX_MEMO_TEXT, folderFor,
+    THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT, MAX_MEMO_TEXT, MAX_STUDY_MINUTES, STUDY_QUICK_MINUTES,
+    folderFor, studyWindow, elapsedMinutes,
     localDateStr, addDays, isoWithOffset, isValidDateStr, parseHHMM, sleepMinutes, formatMinutes,
     normalizeNumber, validate, newId, buildRecord, fileName, serialize, summarize,
   };

@@ -9,7 +9,7 @@
  *  - 開いている間は、その版のキャッシュだけから配る(HTML と JS が必ず同じ版になる)。
  *  - 新しい版が入ると、ページ側(app.js)が一度だけ読み直して新しい版に切り替わる。
  */
-const CACHE = "pocket-2026-09-30.2";
+const CACHE = "pocket-2026-10-06.1";
 const SHELL = [
   "./", "index.html", "app.js", "core.js", "auth.js", "config.js", "manifest.webmanifest",
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",

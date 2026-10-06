@@ -19,7 +19,7 @@
 
   const C = window.PocketCore;
   const A = window.PocketAuth;
-  const APP_VERSION = "2026-09-30.2";
+  const APP_VERSION = "2026-10-06.1";
 
   const KEYS = {
     queue: "pocket.queue",
@@ -29,6 +29,9 @@
     outbox: "pocket.outbox",
     outboxCheckedAt: "pocket.outbox.checkedAt",
     memoDraft: "pocket.draft.memo",
+    // 勉強時間: 送った記録の控え(日付と分と ID だけ。PC の集計に入るまで数字に足すため。14日で消す)と計測中の状態
+    studyLocal: "pocket.study.local",
+    studyTimer: "pocket.study.timer",
   };
   const TABS = ["today", "entry", "memo", "sleep", "money", "send"];
   const MAX_SENT_LOG = 30;
@@ -154,7 +157,7 @@
   const $ = (id) => document.getElementById(id);
   const today = () => C.localDateStr(new Date());
   const prefs = Object.assign(
-    { bedTime: "", category: {}, lastTab: "today", taskCategoryId: null, memoNoteId: null },
+    { bedTime: "", category: {}, lastTab: "today", taskCategoryId: null, memoNoteId: null, studyAskDismissed: null },
     load(KEYS.prefs, {}),
   );
   const savePrefs = () => save(KEYS.prefs, prefs);
@@ -193,7 +196,7 @@
     prefs.lastTab = name;
     savePrefs();
     if (name === "send") renderSend();
-    if (name === "today") { renderToday(); renderTaskCats(); }
+    if (name === "today") { renderToday(); renderTaskCats(); renderTimer(); }
     if (name === "sleep") renderSleepHistory();
     if (name === "memo") renderMemoTargets();
     window.scrollTo(0, 0);
@@ -201,7 +204,7 @@
   document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
   // ---------- 日付チップ(今日/昨日) ----------
-  const dateInputs = { entry: $("entryDate"), sleep: $("sleepDate"), money: $("moneyDate") };
+  const dateInputs = { entry: $("entryDate"), sleep: $("sleepDate"), money: $("moneyDate"), study: $("studyDate") };
   function setupDateChips(kind, onChange) {
     const input = dateInputs[kind];
     const holder = document.querySelector(`[data-date-chips="${kind}"]`);
@@ -327,6 +330,8 @@
   }
 
   function renderToday() {
+    renderStudy();
+    renderFront();
     const ob = outbox();
     const t = today();
     $("todayTitle").textContent = `今日の予定 ${shortDate(t)}`;
@@ -409,6 +414,242 @@
       ]));
     });
     if (tk.truncated) tasksBox.append(el("p", { class: "muted", text: "ほかにもあります(PCのカンバンで確認できます)。" }));
+  }
+
+  // =====================================================================
+  // 勉強時間(直近7日・事後報告・計測・昨日の分)  2026-10-06
+  // 記録は study/ フォルダへ送る(PC の予定表アプリ・ランチャーが確認なしで取り込む)。
+  // 数字は PC から届いた集計(outbox.study)に、まだ PC に届いていない分(端末の控え)を足して出す。
+  // 連続日数・ノルマ・未達の赤表示は出さない。
+  // =====================================================================
+  const STUDY_LOCAL_DAYS = 14;
+  const TIMER_NUDGE_MIN = 15;
+  const TIMER_LONG_MIN = 180;
+
+  function studyLocal() {
+    const list = load(KEYS.studyLocal, []);
+    return Array.isArray(list) ? list.filter((r) => r && C.isValidDateStr(r.date) && Number.isInteger(r.minutes)) : [];
+  }
+
+  function saveStudy(date, minutes, source, errorEl) {
+    const data = { date, minutes };
+    if (source === "timer") data.source = "timer";
+    const problem = C.validate("study", data, today());
+    errorEl.textContent = problem || "";
+    if (problem) return false;
+    const rec = C.buildRecord("study", data, new Date());
+    if (!enqueueRecord(rec, errorEl, { quiet: true })) return false;
+    const since = C.addDays(today(), -STUDY_LOCAL_DAYS);
+    const list = studyLocal().filter((r) => r.date >= since);
+    list.push({ id: rec.id, date, minutes, at: rec.created_at });
+    save(KEYS.studyLocal, list);
+    toast(`${shortDate(date)} に ${C.formatMinutes(minutes)} を記録しました`);
+    renderStudy();
+    return true;
+  }
+
+  const syncStudyDate = setupDateChips("study", () => {});
+  C.STUDY_QUICK_MINUTES.forEach((m) => {
+    const b = el("button", { class: "chip", type: "button", text: `+${m}分` });
+    b.addEventListener("click", () => saveStudy(dateInputs.study.value, m, null, $("studyError")));
+    $("studyQuick").append(b);
+  });
+  function saveStudyInput() {
+    const digits = C.normalizeNumber($("studyMinutes").value);
+    if (!digits) { $("studyError").textContent = "分を数字で入力してください。"; return; }
+    if (saveStudy(dateInputs.study.value, Number(digits), null, $("studyError"))) $("studyMinutes").value = "";
+  }
+  $("studySave").addEventListener("click", saveStudyInput);
+  $("studyMinutes").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); saveStudyInput(); }
+  });
+
+  // 昨日の分(未報告のときだけ。「あとで」でその日は聞かない)
+  [0].concat(C.STUDY_QUICK_MINUTES).forEach((m) => {
+    const b = el("button", { class: "chip", type: "button", text: `${m}分` });
+    b.addEventListener("click", () => saveStudy(C.addDays(today(), -1), m, null, $("studyError")));
+    $("studyAskChips").append(b);
+  });
+  const askLater = el("button", { class: "chip", type: "button", text: "あとで" });
+  askLater.addEventListener("click", () => { prefs.studyAskDismissed = today(); savePrefs(); renderStudy(); });
+  $("studyAskChips").append(askLater);
+
+  function renderStudy() {
+    const ob = outbox();
+    const t = today();
+    const st = ob && ob.study;
+    const w = C.studyWindow(st, studyLocal(), t, 7);
+    $("studyTotal").textContent = w.trackingStart ? C.formatMinutes(w.total) : "まだ記録がありません";
+    const parts = [];
+    if (w.ratio !== null) parts.push(`勉強できた時間の ${Math.round(w.ratio * 100)}%`);
+    if (!ob) parts.push("PCの集計はまだ届いていません");
+    else if (st && !st.available) parts.push(`PCの集計を読めませんでした(${st.reason || "不明"})`);
+    else if (!st) parts.push("PCを更新すると勉強できた時間も出ます");
+    if (w.pending) parts.push(`PCに未反映 ${w.pending}件を含む`);
+    $("studyRatio").textContent = parts.join("・");
+
+    const bars = $("studyBars");
+    bars.replaceChildren();
+    const top = Math.max(60, ...w.days.map((d) => Math.max(d.capacity || 0, d.reported || 0)));
+    w.days.forEach((d) => {
+      const [y, m, dd] = d.date.split("-").map(Number);
+      const full = Math.max(d.capacity || 0, d.reported || 0);
+      const track = el("div", { class: "track" + (d.counted ? "" : " off"), style: `height:${Math.max(3, Math.round(full / top * 100))}%` });
+      if (d.reported) track.append(el("i", { class: "fill", style: `height:${Math.round(d.reported / full * 100)}%` }));
+      const label = d.rest ? "休養" : !d.counted ? "" : d.reported === null ? "—" : `${Math.floor(d.reported / 60)}:${pad(d.reported % 60)}`;
+      bars.append(el("div", { class: "sbar" + (d.date === t ? " today" : "") }, [
+        el("small", { text: label }), track, el("span", { text: `${WEEK[new Date(y, m - 1, dd).getDay()]}${dd}` }),
+      ]));
+    });
+
+    let todayText = `今日 ${C.formatMinutes(w.todayReported)}`;
+    if (ob && ob.today === t && st && Array.isArray(st.forecast) && st.forecast[0]) {
+      const gen = new Date(ob.generated_at);
+      const at = isNaN(gen) ? "" : `(PCで ${pad(gen.getHours())}:${pad(gen.getMinutes())} に計算)`;
+      todayText += `・このあと勉強できる時間 ${C.formatMinutes(st.forecast[0].capacity_minutes)}${at}`;
+    }
+    $("studyToday").textContent = todayText;
+
+    const y = C.addDays(t, -1);
+    const localY = studyLocal().some((r) => r.date === y);
+    const obY = st && Array.isArray(st.days) ? st.days.find((d) => d.date === y) : null;
+    const reportedY = !!(obY && obY.reported_minutes !== null && obY.reported_minutes !== undefined);
+    $("studyAsk").hidden = localY || reportedY || prefs.studyAskDismissed === t;
+    $("studyAskText").textContent = `昨日 ${shortDate(y)} は何分勉強しましたか?(0分でも大丈夫です)`;
+  }
+
+  // ---------- 計測(開始時刻を端末に置き、差で数える。閉じても・ロックしても狂わない) ----------
+  let timerTick = null;
+  function timerState() { return load(KEYS.studyTimer, null); }
+  function clockText(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+  }
+  function updateTimerRead() {
+    const s = timerState();
+    if (!s || s.stoppedAt) return;
+    const ms = Date.now() - s.startedAt;
+    $("timerRead").textContent = clockText(ms);
+    $("timerNote").textContent = ms >= TIMER_NUDGE_MIN * 60000
+      ? "15分たちました。止めても、続けても大丈夫です。"
+      : "まず15分。終わったら「終わる」を押してください。";
+  }
+  function renderTimer() {
+    const s = timerState();
+    clearInterval(timerTick);
+    timerTick = null;
+    const running = !!(s && s.startedAt && !s.stoppedAt);
+    if (running && C.elapsedMinutes(s.startedAt, Date.now()) >= TIMER_LONG_MIN) {
+      stopTimer(true);   // 止め忘れ: 終わった時刻を聞く
+      return;
+    }
+    const done = !!(s && s.stoppedAt);
+    $("timerStart").hidden = !!s;
+    $("timerRunning").hidden = !running;
+    $("timerDone").hidden = !done;
+    $("timerLong").hidden = !(done && s.long);
+    if (running) {
+      updateTimerRead();
+      timerTick = setInterval(updateTimerRead, 1000);
+    } else if (done) {
+      $("timerRead").textContent = clockText(s.stoppedAt - s.startedAt);
+      $("timerNote").textContent = "記録すると送ります。";
+    } else {
+      $("timerRead").textContent = "0:00";
+      $("timerNote").textContent = "計り忘れても大丈夫。あとから上で記録できます。";
+    }
+  }
+  function stopTimer(long) {
+    const s = timerState();
+    if (!s) return;
+    s.stoppedAt = Date.now();
+    s.long = !!long;
+    save(KEYS.studyTimer, s);
+    $("timerMinutes").value = String(C.elapsedMinutes(s.startedAt, s.stoppedAt));
+    if (long) {
+      const now = new Date();
+      $("timerEnd").value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    }
+    $("timerError").textContent = "";
+    renderTimer();
+  }
+  $("timerStart").addEventListener("click", () => {
+    save(KEYS.studyTimer, { startedAt: Date.now(), date: today() });
+    renderTimer();
+  });
+  $("timerStop").addEventListener("click", () => stopTimer(false));
+  $("timerCancel").addEventListener("click", () => {
+    if (!confirm("計測をやめますか?(記録はしません)")) return;
+    drop(KEYS.studyTimer);
+    renderTimer();
+  });
+  $("timerEnd").addEventListener("change", () => {
+    const s = timerState();
+    const hm = C.parseHHMM($("timerEnd").value);
+    if (!s || !hm) return;
+    const start = new Date(s.startedAt);
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate(), hm.h, hm.min);
+    if (end.getTime() < s.startedAt) end.setDate(end.getDate() + 1);
+    s.stoppedAt = Math.min(end.getTime(), Date.now());
+    save(KEYS.studyTimer, s);
+    $("timerMinutes").value = String(C.elapsedMinutes(s.startedAt, s.stoppedAt));
+    renderTimer();
+  });
+  $("timerSave").addEventListener("click", () => {
+    const s = timerState();
+    if (!s) return;
+    const digits = C.normalizeNumber($("timerMinutes").value);
+    if (!digits) { $("timerError").textContent = "分を数字で入力してください。"; return; }
+    if (saveStudy(s.date, Number(digits), "timer", $("timerError"))) {
+      drop(KEYS.studyTimer);
+      renderTimer();
+    }
+  });
+  $("timerDiscard").addEventListener("click", () => {
+    if (!confirm("この計測を捨てますか?(記録はしません)")) return;
+    drop(KEYS.studyTimer);
+    renderTimer();
+  });
+
+  // =====================================================================
+  // 前線(進行中のプロジェクトの一番手前の項目。見るだけ)
+  // =====================================================================
+  function renderFront() {
+    const box = $("frontList");
+    box.replaceChildren();
+    const ob = outbox();
+    const fr = ob && ob.front;
+    if (!ob) {
+      box.append(el("p", { class: "muted", text: "PCでランチャーを起動すると、各プロジェクトの次の項目がここに届きます。" }));
+      return;
+    }
+    if (!fr || !fr.available) {
+      box.append(el("p", { class: "muted", text: `プロジェクトを読めませんでした(${(fr && fr.reason) || "PCのアプリが古いかもしれません"})。` }));
+      return;
+    }
+    const lanes = Array.isArray(fr.lanes) ? fr.lanes : [];
+    if (!lanes.length) box.append(el("p", { class: "muted", text: "進行中のプロジェクトはありません。" }));
+    const t = today();
+    lanes.forEach((ln) => {
+      const progress = ln.total ? `${ln.done}/${ln.total}` : "";
+      const node = el("div", { class: "lane" }, [
+        el("div", { class: "head" }, [el("b", { text: ln.title || "(無題)" }), el("span", { class: "muted", text: progress })]),
+      ]);
+      if (ln.kind === "明文化") {
+        node.append(el("div", { class: "next", text: `次の一歩: ${ln.next_step || "(まだありません)"}` }));
+      } else if (ln.front) {
+        const badge = ln.front.date
+          ? (ln.front.date < t ? el("span", { class: "late", text: `${shortDate(ln.front.date)}・日付を過ぎています` })
+            : el("span", { class: "due", text: shortDate(ln.front.date) }))
+          : null;
+        node.append(el("div", { class: "front" }, [el("div", { text: ln.front.text }), badge]));
+        (ln.next || []).forEach((n) => node.append(el("div", { class: "next", text: `次: ${n.text}` })));
+      } else {
+        node.append(el("div", { class: "next", text: "すべて終わりました。" }));
+      }
+      box.append(node);
+    });
   }
 
   // ---------- PC から届いた情報を読む ----------
@@ -1067,8 +1308,8 @@
   window.addEventListener("offline", updatePill);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
-    [syncEntryDate, syncSleepDate, syncMoneyDate].forEach((f) => f());
-    if (!$("tab-today").hidden) renderToday();
+    [syncEntryDate, syncSleepDate, syncMoneyDate, syncStudyDate].forEach((f) => f());
+    if (!$("tab-today").hidden) { renderToday(); renderTimer(); }
     if (!$("tab-sleep").hidden) renderSleepHistory();
     trySendQuietly();
     refreshOutboxIfOld();
@@ -1119,5 +1360,7 @@
   window.__pocket = {
     queue, version: APP_VERSION, photos: Photos, fileTextFor, renderToday, renderSleepHistory, refreshOutbox,
     enqueue: (k, d) => enqueue(k, d, { textContent: "" }),
+    studyLocal, saveStudy: (d, m, s) => saveStudy(d, m, s, { textContent: "" }), renderStudy, renderTimer,
+    renderFront, timerState, stopTimer,
   };
 })();
