@@ -19,7 +19,7 @@
 
   const C = window.PocketCore;
   const A = window.PocketAuth;
-  const APP_VERSION = "2026-10-06.1";
+  const APP_VERSION = "2026-10-06.2";
 
   const KEYS = {
     queue: "pocket.queue",

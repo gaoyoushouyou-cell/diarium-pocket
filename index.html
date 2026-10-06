@@ -6,7 +6,7 @@
   <title>Diarium Pocket</title>
   <meta name="description" content="スマホで書いて、PCの日記アプリ(Diarium)に届ける小さな日記帳">
   <meta name="theme-color" content="#F6F3ED" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1D1F1C" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#16181D" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Pocket">
@@ -18,23 +18,25 @@
   <link rel="icon" href="icons/icon-192.png">
   <style>
     :root {
-      --bg: #F6F3ED; --card: #FFFFFF; --text: #2F3337; --sub: #70757A; --accent: #5E7963;
-      --accent-pale: #E7EEE8; --border: #E3DED5; --danger: #B85C5C; --amber: #E0A24E;
+      /* 2026-10-06 スイート統一: 操作色は全アプリ共通の青(紙の面では濃い #2F5FCC)、
+         暗い面は PC のアプリと同じ地・面・文字。紙の地はそのまま。 */
+      --bg: #F6F3ED; --card: #FFFFFF; --text: #2F3337; --sub: #64696E; --accent: #2F5FCC;
+      --accent-pale: #E8EEFA; --border: #E3DED5; --danger: #B85C5C; --amber: #E0A24E;
       --income: #3E7C5A; --chip: #F1EEE7; --on-accent: #FFFFFF;
       --radius: 16px; --radius-s: 12px;
       --tabbar: calc(64px + env(safe-area-inset-bottom));
     }
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
-        --bg: #1D1F1C; --card: #272A26; --text: #ECEAE4; --sub: #A3A69F; --accent: #8FB394;
-        --accent-pale: #2F3A31; --border: #3A3D38; --danger: #E08A8A; --income: #7FC49A;
-        --chip: #30332E; --on-accent: #10140F;
+        --bg: #16181D; --card: #1C1F26; --text: #E4E7EC; --sub: #9AA3B2; --accent: #7AA2F7;
+        --accent-pale: #2A3550; --border: #2A2F3A; --danger: #CD8A82; --income: #7FB489;
+        --chip: #232732; --on-accent: #0E1116;
       }
     }
     :root[data-theme="dark"] {
-      --bg: #1D1F1C; --card: #272A26; --text: #ECEAE4; --sub: #A3A69F; --accent: #8FB394;
-      --accent-pale: #2F3A31; --border: #3A3D38; --danger: #E08A8A; --income: #7FC49A;
-      --chip: #30332E; --on-accent: #10140F;
+      --bg: #16181D; --card: #1C1F26; --text: #E4E7EC; --sub: #9AA3B2; --accent: #7AA2F7;
+      --accent-pale: #2A3550; --border: #2A2F3A; --danger: #CD8A82; --income: #7FB489;
+      --chip: #232732; --on-accent: #0E1116;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; background: var(--bg); color: var(--text); }
