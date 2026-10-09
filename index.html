@@ -197,6 +197,20 @@
     .lane .head b { font-size: 15px; }
     .lane .front { margin-top: 6px; padding: 8px 10px; border: 2px solid var(--accent); border-radius: var(--radius-s); }
     .lane .next { font-size: 13px; color: var(--sub); margin-top: 4px; }
+    .lane .branch { margin-top: 8px; font-size: 13px; }
+    .routines { margin-top: 8px; padding: 6px 10px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); }
+    .routines .rt-head { font-size: 12px; margin-bottom: 2px; }
+    .rt-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    .rt-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .rt-name small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rt-dots { color: var(--sub); font-size: 12px; letter-spacing: 1px; white-space: nowrap; }
+    .rt-dots i { font-style: normal; }
+    .rt-dots i.on { color: var(--accent); }
+    .rt-count { font-size: 12px; white-space: nowrap; }
+    .rt-btn { min-height: 34px; padding: 4px 10px; font-size: 13px; white-space: nowrap; flex: none; }
+    .rt-btn:disabled { opacity: .75; }
+    .rt-y { display: block; margin: -2px 0 4px; padding: 2px 0; background: none; border: 0; color: var(--accent); font-size: 12px; text-decoration: underline; }
+    .rt-note { font-size: 11px; margin-top: 2px; }
     .late { font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap;
             background: color-mix(in srgb, var(--amber) 25%, var(--card)); color: var(--text); }
   </style>
@@ -252,7 +266,7 @@
       <div class="card" id="frontCard">
         <h2>プロジェクトの次の項目</h2>
         <div id="frontList"></div>
-        <p class="muted" style="margin:8px 0 0">チェックは PC のカンバン(前線)で。ここでは見るだけです。</p>
+        <p class="muted" style="margin:8px 0 0">項目のチェックは PC のカンバン(前線)で。ルーティンの「今日やった」はここでも付けられます。</p>
       </div>
       <div class="card">
         <h2>やることを追加</h2>

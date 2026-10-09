@@ -19,7 +19,7 @@
 
   const C = window.PocketCore;
   const A = window.PocketAuth;
-  const APP_VERSION = "2026-10-06.2";
+  const APP_VERSION = "2026-10-07.2";
 
   const KEYS = {
     queue: "pocket.queue",
@@ -32,6 +32,8 @@
     // 勉強時間: 送った記録の控え(日付と分と ID だけ。PC の集計に入るまで数字に足すため。14日で消す)と計測中の状態
     studyLocal: "pocket.study.local",
     studyTimer: "pocket.study.timer",
+    // ルーティン: 送った「やった」の控え(プロジェクト・名前・日付・ID だけ。PC の集計に入るまで点に足すため。14日で消す)
+    routineLocal: "pocket.routine.local",
   };
   const TABS = ["today", "entry", "memo", "sleep", "money", "send"];
   const MAX_SENT_LOG = 30;
@@ -613,6 +615,63 @@
   });
 
   // =====================================================================
+  // ルーティン(単語・リスニングなど毎日に近いこと。2026-10-07)
+  // 「やった」は routine/ フォルダへ送る(PC のカンバン・ランチャー・プロジェクトアプリが確認なしで取り込む)。
+  // 見せるのは直近7日の点と「何日」だけ。連続日数・目安・やらなかった日の色は出さない。取り消しは PC(カンバン)で。
+  // =====================================================================
+  const ROUTINE_LOCAL_DAYS = 14;
+
+  function routineLocal() {
+    const list = load(KEYS.routineLocal, []);
+    return Array.isArray(list) ? list.filter((r) => r && C.isValidDateStr(r.date) && typeof r.routine === "string") : [];
+  }
+
+  function saveRoutine(projectId, key, date) {
+    const data = { project: projectId, routine: key, date };
+    const problem = C.validate("routine", data, today());
+    if (problem) { toast(problem); return false; }
+    const rec = C.buildRecord("routine", data, new Date());
+    if (!enqueueRecord(rec, { textContent: "" }, { quiet: true })) { toast("端末に保存できませんでした"); return false; }
+    const since = C.addDays(today(), -ROUTINE_LOCAL_DAYS);
+    const list = routineLocal().filter((r) => r.date >= since);
+    list.push({ id: rec.id, project: projectId, routine: key, date, at: rec.created_at });
+    save(KEYS.routineLocal, list);
+    toast(`${date === today() ? "今日" : shortDate(date)}の「${key}」を記録しました`);
+    renderFront();
+    return true;
+  }
+
+  function routineBlock(ln, recordIds) {
+    const t = today();
+    const box = el("div", { class: "routines" }, [el("div", { class: "muted rt-head", text: "ルーティン・直近7日" })]);
+    (ln.routines || []).forEach((v) => {
+      if (!v || !v.key) return;
+      const w = C.routineWindow(ln.id, v, routineLocal(), recordIds, t, 7);
+      const dots = el("span", { class: "rt-dots" }, w.days.map((d) => el("i", { class: d.done ? "on" : "", text: d.done ? "●" : "・" })));
+      const btn = el("button", {
+        class: "chip rt-btn", type: "button", text: w.todayDone ? "✓ 今日" : "今日やった",
+        "aria-pressed": w.todayDone ? "true" : "false",
+      });
+      if (w.todayDone) btn.disabled = true;
+      else btn.addEventListener("click", () => saveRoutine(ln.id, v.key, t));
+      const row = el("div", { class: "rt-row" }, [
+        el("div", { class: "rt-name" }, [el("b", { text: v.key }), v.text ? el("small", { class: "muted", text: v.text }) : null]),
+        dots, el("span", { class: "muted rt-count", text: `${w.count}日` }), btn,
+      ]);
+      box.append(row);
+      if (!w.yesterdayDone) {
+        const y = C.addDays(t, -1);
+        const yb = el("button", { class: "rt-y", type: "button", text: `昨日 ${shortDate(y)} もやった` });
+        yb.addEventListener("click", () => saveRoutine(ln.id, v.key, y));
+        box.append(yb);
+      }
+      if (w.pending) box.append(el("div", { class: "muted rt-note", text: `PCに未反映 ${w.pending}件を含む` }));
+    });
+    box.append(el("div", { class: "muted rt-note", text: "取り消しはPCのカンバン(前線タブ)でできます。" }));
+    return box;
+  }
+
+  // =====================================================================
   // 前線(進行中のプロジェクトの一番手前の項目。見るだけ)
   // =====================================================================
   function renderFront() {
@@ -636,8 +695,32 @@
       const node = el("div", { class: "lane" }, [
         el("div", { class: "head" }, [el("b", { text: ln.title || "(無題)" }), el("span", { class: "muted", text: progress })]),
       ]);
+      if (Array.isArray(ln.routines) && ln.routines.some((v) => v && v.key)) {
+        node.append(routineBlock(ln, fr.routine_record_ids || []));
+      }
+      const branches = Array.isArray(ln.branches) ? ln.branches : [];
+      const badgeOf = (it, ahead) => (it && it.date
+        ? (it.date < t ? el("span", { class: "late", text: `${ahead ? "期日 " : ""}${shortDate(it.date)}・過ぎています` })
+          : el("span", { class: "due", text: `${ahead ? "期日 " : ""}${shortDate(it.date)}` }))
+        : null);
       if (ln.kind === "明文化") {
         node.append(el("div", { class: "next", text: `次の一歩: ${ln.next_step || "(まだありません)"}` }));
+      } else if (branches.length > 1) {
+        // 系列(分岐)ごとに一番手前を見せる(2026-10-07)
+        branches.forEach((b) => {
+          node.append(el("div", { class: "branch" }, [
+            el("b", { text: `● ${b.name}${b.ahead ? "・先取り" : ""}` }),
+            el("span", { class: "muted", text: ` ${b.done}/${b.total}` }),
+          ]));
+          if (b.waiting_for) {
+            node.append(el("div", { class: "next", text: `待ち: 「${b.waiting_for}」が済んだら始まります` }));
+          } else if (b.front) {
+            node.append(el("div", { class: "front" }, [el("div", { text: b.front.text }), badgeOf(b.front, b.ahead)]));
+            (b.next || []).slice(0, 1).forEach((n) => node.append(el("div", { class: "next", text: `次: ${n.text}` })));
+          } else {
+            node.append(el("div", { class: "next", text: "この系列はすべて済み" }));
+          }
+        });
       } else if (ln.front) {
         const badge = ln.front.date
           ? (ln.front.date < t ? el("span", { class: "late", text: `${shortDate(ln.front.date)}・日付を過ぎています` })
@@ -1361,6 +1444,6 @@
     queue, version: APP_VERSION, photos: Photos, fileTextFor, renderToday, renderSleepHistory, refreshOutbox,
     enqueue: (k, d) => enqueue(k, d, { textContent: "" }),
     studyLocal, saveStudy: (d, m, s) => saveStudy(d, m, s, { textContent: "" }), renderStudy, renderTimer,
-    renderFront, timerState, stopTimer,
+    renderFront, timerState, stopTimer, routineLocal, saveRoutine,
   };
 })();

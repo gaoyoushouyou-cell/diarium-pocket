@@ -57,10 +57,13 @@
   // 勉強時間(PC の予定表アプリ destinate_app/study_core.py と同じ上限。1回の記録は 0〜960 分)
   const MAX_STUDY_MINUTES = 16 * 60;
   const STUDY_QUICK_MINUTES = [30, 60, 90, 120];
-  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク", memo: "メモ", study: "勉強時間" };
-  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅", memo: "📝", study: "📚" };
+  // ルーティン(2026-10-07。PC の project/project_app/core/routines.py と同じ上限)
+  const MAX_ROUTINE_KEY = 40;
+  const MAX_ROUTINE_BACK_DAYS = 31;
+  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク", memo: "メモ", study: "勉強時間", routine: "ルーティン" };
+  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅", memo: "📝", study: "📚", routine: "🔁" };
   // 送り先のフォルダ(OneDrive の「アプリ/Diarium Pocket/」の中)
-  const FOLDER_FOR = { task: "tasks", memo: "memos", study: "study" };
+  const FOLDER_FOR = { task: "tasks", memo: "memos", study: "study", routine: "routine" };
   const folderFor = (kind) => FOLDER_FOR[kind] || "inbox";
 
   const pad = (n) => String(n).padStart(2, "0");
@@ -150,6 +153,14 @@
     }
     if (!data || !isValidDateStr(data.date)) return "日付を選んでください。";
     if (data.date > todayStr) return "未来の日付は保存できません。";
+    if (kind === "routine") {
+      // プロジェクトの ID(PC から届いた前線の一覧)と、ルーティンの名前
+      if (typeof data.project !== "string" || !data.project) return "プロジェクトが正しくありません。";
+      const key = String(data.routine || "").trim();
+      if (!key || key.length > MAX_ROUTINE_KEY) return "ルーティンの名前が正しくありません。";
+      if (data.date < addDays(todayStr, -MAX_ROUTINE_BACK_DAYS)) return `${MAX_ROUTINE_BACK_DAYS}日より前の日には付けられません。`;
+      return null;
+    }
     if (kind === "study") {
       // 0 分も「勉強しなかったと報告した」として記録できる(未報告とは別)
       if (!Number.isInteger(data.minutes)) return "分を数字で入力してください。";
@@ -232,6 +243,34 @@
     };
   }
 
+  /**
+   * ルーティン1つの直近 n 日(既定7日。今日が最後)。PC から届いた日ごとの「やった」(view.days)に、
+   * まだ PC に届いていないスマホの記録(local: [{id, project, routine, date}])を足して見せる。
+   * PC の記録 ID(recordIds)に入っている記録は、もう PC の集計に入っているので足さない。
+   * 連続日数や目安は出さない(数えるのは何日やったかだけ)。
+   */
+  function routineWindow(projectId, view, local, recordIds, todayStr, n) {
+    n = n || 7;
+    const known = new Set(recordIds || []);
+    const doneOn = new Set(((view && view.days) || []).filter((d) => d && d.done).map((d) => d.date));
+    const key = view && view.key;
+    let pending = 0;
+    (local || []).forEach((r) => {
+      if (!r || known.has(r.id) || r.project !== projectId || r.routine !== key || !isValidDateStr(r.date)) return;
+      if (!doneOn.has(r.date)) pending += 1;
+      doneOn.add(r.date);
+    });
+    const days = [];
+    for (let k = n - 1; k >= 0; k--) {
+      const ds = addDays(todayStr, -k);
+      days.push({ date: ds, done: doneOn.has(ds) });
+    }
+    return {
+      days, count: days.filter((d) => d.done).length,
+      todayDone: doneOn.has(todayStr), yesterdayDone: doneOn.has(addDays(todayStr, -1)), pending,
+    };
+  }
+
   /** 計測の開始(ms)から終了(ms)までの分(四捨五入。負にはしない)。 */
   function elapsedMinutes(startMs, endMs) {
     return Math.max(0, Math.round((endMs - startMs) / 60000));
@@ -262,6 +301,10 @@
       clean.note_title = String(clean.note_title || "");
     }
     if (kind === "expense" || kind === "income") clean.memo = (clean.memo || "").trim();
+    if (kind === "routine") {
+      const out = { project: clean.project, routine: String(clean.routine || "").trim(), date: clean.date };
+      return { format: FORMAT, v: VERSION, id: id || newId(), kind, created_at: isoWithOffset(now), data: out };
+    }
     if (kind === "study") {
       const out = { date: clean.date, minutes: clean.minutes };
       if (clean.source === "timer") out.source = "timer";
@@ -302,6 +345,9 @@
       const min = sleepMinutes(d.date, d.bed_time, d.wake_time);
       return `${d.bed_time} → ${d.wake_time}${min !== null ? `(${formatMinutes(min)})` : ""}`;
     }
+    if (record.kind === "routine") {
+      return `${d.date.slice(5).replace("-", "/")} ${d.routine} をやった`;
+    }
     if (record.kind === "study") {
       return `${d.date.slice(5).replace("-", "/")} に ${formatMinutes(d.minutes)}${d.source === "timer" ? "(計測)" : ""}`;
     }
@@ -312,7 +358,8 @@
     FORMAT, VERSION, MAX_TEXT_LENGTH, MAX_MEMO, MAX_AMOUNT, MOODS, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
     EXPENSE_QUICK_AMOUNTS, INCOME_QUICK_AMOUNTS, SLEEP_QUALITY, KIND_LABELS, KIND_EMOJI,
     THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT, MAX_MEMO_TEXT, MAX_STUDY_MINUTES, STUDY_QUICK_MINUTES,
-    folderFor, studyWindow, elapsedMinutes,
+    MAX_ROUTINE_KEY, MAX_ROUTINE_BACK_DAYS,
+    folderFor, studyWindow, routineWindow, elapsedMinutes,
     localDateStr, addDays, isoWithOffset, isValidDateStr, parseHHMM, sleepMinutes, formatMinutes,
     normalizeNumber, validate, newId, buildRecord, fileName, serialize, summarize,
   };
