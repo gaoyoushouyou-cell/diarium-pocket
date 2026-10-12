@@ -52,7 +52,7 @@
       padding: 14px 16px 6px; max-width: 560px; margin: 0 auto;
     }
     .brand { display: flex; flex-direction: column; min-width: 0; }
-    .brand b { font-size: 20px; letter-spacing: .02em; white-space: nowrap; line-height: 1.2; }
+    .brand b { font-size: 20px; letter-spacing: .02em; white-space: nowrap; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
     .brand small { color: var(--sub); font-size: 12px; line-height: 1.3; }
     .pill {
       font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--chip); color: var(--sub);
@@ -129,6 +129,7 @@
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; position: relative;
     }
     nav.tabs button span:first-child { font-size: 22px; line-height: 1; }
+    nav.tabs button span:last-child { white-space: nowrap; font-size: 10px; letter-spacing: -.02em; }
     nav.tabs button[aria-selected="true"] { color: var(--accent); font-weight: 600; }
     .badge {
       position: absolute; top: 6px; left: calc(50% + 8px); background: var(--amber); color: #2B2B2B;
@@ -190,17 +191,89 @@
     .timer { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px; }
     .timer-read { font-size: 40px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
     .minutes-row input { width: 120px; }
-    /* 前線 */
-    .lane { padding: 10px 0; border-top: 1px solid var(--border); }
-    .lane:first-child { border-top: 0; }
-    .lane .head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-    .lane .head b { font-size: 15px; }
-    .lane .front { margin-top: 6px; padding: 8px 10px; border: 2px solid var(--accent); border-radius: var(--radius-s); }
-    .lane .next { font-size: 13px; color: var(--sub); margin-top: 4px; }
-    .lane .branch { margin-top: 8px; font-size: 13px; }
-    .routines { margin-top: 8px; padding: 6px 10px 8px; border: 1px solid var(--border); border-radius: var(--radius-s); }
-    .routines .rt-head { font-size: 12px; margin-bottom: 2px; }
-    .rt-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    /* 2026-10-12 タブ再編: ヘッダーの「送る」・カードの「?」・上の切り替え */
+    .head-right { display: flex; gap: 6px; align-items: center; flex: none; }
+    .send-btn {
+      position: relative; display: flex; align-items: center; gap: 4px; border: 1px solid var(--border);
+      background: var(--card); color: var(--text); border-radius: 999px; font: inherit; font-size: 13px;
+      padding: 4px 12px; min-height: 36px;
+    }
+    .send-btn .badge { position: static; display: none; }
+    .send-btn .badge.on { display: inline-flex; }
+    .send-head { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .send-head b { font-size: 17px; }
+    .card-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
+    .card-h h2 { margin: 0; }
+    .help-btn {
+      width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: var(--chip);
+      color: var(--sub); font: inherit; font-size: 13px; font-weight: 700; padding: 0; flex: none;
+    }
+    .help-btn[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    .help { font-size: 13px; color: var(--sub); background: var(--chip); border-radius: 10px; padding: 8px 10px; margin: -2px 0 10px; }
+    .seg.top { margin-top: 12px; }
+    .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .open .clip { white-space: normal; overflow: visible; }
+    /* やること: 7日の帯・時間帯・タスクの分け方 */
+    .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .week .day {
+      border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 5px 0 6px; font: inherit;
+      color: var(--text); display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0;
+    }
+    .week .day .w { font-size: 11px; color: var(--sub); }
+    .week .day .d { font-size: 16px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .week .day .load { width: 70%; height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; }
+    .week .day .load i { display: block; height: 100%; background: var(--sub); opacity: .55; }
+    .week .day.is-today .w { color: var(--accent); font-weight: 700; }
+    .week .day.free .d { color: var(--sub); font-weight: 500; }
+    .week .day[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-pale); box-shadow: 0 0 0 1px var(--accent) inset; }
+    .day-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 12px; }
+    .tl { position: relative; height: 26px; background: var(--chip); border-radius: 8px; margin: 10px 0 2px; overflow: hidden; }
+    .tl .blk { position: absolute; top: 4px; bottom: 4px; border-radius: 5px; background: var(--accent); opacity: .85; }
+    .tl .now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); }
+    .tl-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--sub); font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+    .plan { cursor: pointer; }
+    .plan .what.past { color: var(--sub); }
+    .tstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
+    .tstat { background: var(--chip); border-radius: 10px; padding: 6px 10px; display: flex; flex-direction: column; }
+    .tstat small { font-size: 11px; color: var(--sub); }
+    .tstat b { font-size: 18px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+    .tstat.warn b { color: var(--danger); }
+    .grp { font-size: 12px; font-weight: 700; color: var(--sub); margin: 10px 0 0; letter-spacing: .04em; }
+    .grp + .task { border-top: 0; }
+    .task { cursor: pointer; }
+    .task .tg { color: var(--sub); font-size: 12px; }
+    /* 勉強: 記録 */
+    .study-day { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .quick .chip { border-radius: 10px; font-weight: 600; min-height: 46px; padding: 6px 4px; }
+    details.more { margin-top: 12px; }
+    /* プロジェクト: 1件1行、押すと系列 */
+    .pj { border-top: 1px solid var(--border); }
+    .pj:first-child { border-top: 0; }
+    .pj-row {
+      width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 0;
+      background: none; border: 0; text-align: left; font: inherit; color: var(--text);
+    }
+    .pj-name { font-weight: 600; font-size: 15px; min-width: 0; }
+    .pj-meta { display: flex; gap: 6px; align-items: center; justify-self: end; }
+    .pj-item { grid-column: 1 / -1; font-size: 13px; color: var(--sub); min-width: 0; }
+    .prog { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .caret { color: var(--sub); font-size: 11px; transition: transform .15s; }
+    .pj.open .caret { transform: rotate(90deg); }
+    .pj-body { padding: 0 0 10px; }
+    .br { padding: 7px 10px; border: 1px solid var(--border); border-radius: 10px; margin-top: 6px; }
+    .br-h { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--sub); }
+    .br-h b { color: var(--text); font-weight: 600; }
+    .br-front { font-size: 14px; margin-top: 3px; display: flex; gap: 8px; justify-content: space-between; align-items: baseline; }
+    .br-front span:first-child { min-width: 0; word-break: break-word; }
+    .br-next { font-size: 12.5px; color: var(--sub); margin-top: 2px; }
+    .ahead { font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 0 4px; margin-left: 4px; }
+    .due.soon { background: var(--accent-pale); color: var(--accent); font-weight: 600; }
+    @media (prefers-reduced-motion: reduce) { .caret { transition: none; } }
+    /* ルーティン(勉強タブ) */
+    .rt-proj { font-size: 12px; color: var(--sub); margin: 8px 0 0; }
+    .rt-proj:first-child { margin-top: 0; }
+    .rt-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
     .rt-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .rt-name small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rt-dots { color: var(--sub); font-size: 12px; letter-spacing: 1px; white-space: nowrap; }
@@ -217,15 +290,73 @@
 </head>
 <body>
   <header>
-    <div class="brand"><b>Diarium Pocket</b><small>日記を、PCへ</small></div>
-    <span class="pill" id="netPill">…</span>
+    <div class="brand"><b>Diarium Pocket</b><small id="headDate">日記を、PCへ</small></div>
+    <div class="head-right">
+      <span class="pill" id="netPill">…</span>
+      <button class="send-btn" id="openSend" type="button" aria-label="送る(まだ送っていない記録)">📤<span>送る</span><i class="badge" id="badge"></i></button>
+    </div>
   </header>
 
   <main>
-    <!-- 今日(勉強時間・前線・予定・タスク。PCから届いた情報と、記録・タスクの追加) -->
-    <section id="tab-today" hidden>
+    <!-- アイデア(タスクの追加・メモへの追記。上の切り替えでどちらか) -->
+    <section id="tab-idea" hidden>
+      <div class="seg top" id="ideaSeg">
+        <button type="button" data-seg="task" aria-pressed="true">✅ タスク</button>
+        <button type="button" data-seg="memo" aria-pressed="false">📝 メモ</button>
+      </div>
+      <div data-pane="task">
+        <div class="card">
+          <div class="card-h"><h2>やることを追加</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+          <p class="help" hidden>PCのカンバンと同じ書き方(#タグ @カテゴリ !高 明日)も使えます。「明日」は今日から数えます。カテゴリを選ぶと、カンバンのその列に入ります(「おまかせ」なら文中の @カテゴリ → PC の確認画面の追加先)。</p>
+          <input id="taskText" maxlength="300" autocomplete="off" enterkeyhint="send"
+                 placeholder="例) レポート提出 #学校 !高">
+          <div class="row" id="taskDue" style="margin-top:8px"></div>
+          <input type="date" id="taskDueDate" aria-label="期限" style="margin-top:8px" hidden>
+          <label class="field">カテゴリ</label>
+          <div class="tags" id="taskCats"></div>
+          <p class="muted" id="taskCatsNote" style="margin:4px 0 0" hidden>PCでランチャーを起動すると、カンバンのカテゴリから選べるようになります。</p>
+          <div class="error" id="taskError"></div>
+          <button class="primary" id="taskSave">追加して送る</button>
+        </div>
+      </div>
+      <div data-pane="memo" hidden>
+        <div class="card">
+          <div class="card-h"><h2>どのメモに追記する?</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+          <p class="help" hidden>PCでメモアプリを開くと、選んだメモの末尾に「— スマホから 日時 —」の区切りつきで足されます(確認してから)。<span id="memoListAt"></span></p>
+          <select id="memoTarget" aria-label="追記するメモ"></select>
+          <p class="muted" id="memoTargetNote" style="margin:6px 0 0" hidden></p>
+          <label class="field" for="memoText">追記する内容</label>
+          <textarea id="memoText" style="min-height:30vh" placeholder="思いついたこと、買いたいもの、アイデア…"></textarea>
+          <div class="counter" id="memoCounter">0 / 4000</div>
+          <div class="error" id="memoError"></div>
+          <button class="primary" id="memoSave">追記して送る</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- やること(PCから届いた予定とタスク。見るだけ) -->
+    <section id="tab-todo" hidden>
+      <div class="card">
+        <div class="card-h"><h2>予定</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>PCでランチャーを起動したときの予定表です。日を押すと、その日の予定に切り替わります。日付の下の線は、予定で埋まっている時間の長さです。予定を押すと全文が出ます。</p>
+        <div class="week" id="week" role="group" aria-label="日を選ぶ"></div>
+        <div class="day-title"><b id="dayTitle"></b><span class="muted" id="dayCount"></span></div>
+        <div id="dayLine"></div>
+        <div id="dayPlans"></div>
+        <div class="freshness" id="freshness"><span></span><button class="ghost small" id="refreshOutbox" type="button">更新</button></div>
+      </div>
+      <div class="card" id="tasksCard">
+        <div class="card-h"><h2>タスク</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>期限の近い(または優先度「高」の)未完了タスクだけが届きます。完了のチェックは PC のカンバンで。タスクを押すと全文が出ます。</p>
+        <div id="todoTasks"></div>
+      </div>
+    </section>
+
+    <!-- 勉強(直近7日の勉強時間・記録・ルーティン) -->
+    <section id="tab-study" hidden>
       <div class="card" id="studyCard">
-        <h2>勉強時間(直近7日)</h2>
+        <div class="card-h"><h2>勉強時間(直近7日)</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>数えるのは授業以外の勉強です。薄い棒はその日に勉強できた時間、濃い部分が記録した時間。「昨日は何分?」は、昨日がまだ記録されていないときだけ出ます。</p>
         <div class="study-head"><span class="big" id="studyTotal">—</span><span class="muted" id="studyRatio"></span></div>
         <div class="sbars" id="studyBars" role="img" aria-label="直近7日の勉強時間"></div>
         <p class="muted" id="studyToday" style="margin:6px 0 0"></p>
@@ -233,18 +364,25 @@
           <p id="studyAskText" style="margin:0 0 8px"></p>
           <div class="row" id="studyAskChips"></div>
         </div>
-        <label class="field">勉強した時間を記録(授業は含めない)</label>
-        <div class="row" data-date-chips="study"></div>
-        <input type="date" id="studyDate" aria-label="勉強した日" style="margin-top:8px" hidden>
-        <div class="row" id="studyQuick" style="margin-top:8px"></div>
-        <div class="row minutes-row" style="margin-top:8px">
-          <input id="studyMinutes" inputmode="numeric" autocomplete="off" placeholder="分" aria-label="勉強した分">
-          <button class="ghost" id="studySave" type="button">記録して送る</button>
-        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>記録する</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>あとからまとめて記録できます。授業は含めません。押すとすぐ送ります。</p>
+        <div class="study-day"><span class="muted">どの日?</span><div class="row" data-date-chips="study"></div></div>
+        <div class="quick" id="studyQuick"></div>
+        <details class="more">
+          <summary>ほかの分・日付で記録</summary>
+          <input type="date" id="studyDate" aria-label="勉強した日" style="margin-top:8px">
+          <div class="row minutes-row" style="margin-top:8px">
+            <input id="studyMinutes" inputmode="numeric" autocomplete="off" placeholder="分" aria-label="勉強した分">
+            <button class="ghost" id="studySave" type="button">記録して送る</button>
+          </div>
+        </details>
         <div class="error" id="studyError"></div>
-        <div class="timer" id="timerBox">
+        <!-- 計測(2026-10-12 から画面には出さない。仕組みは残してある) -->
+        <div class="timer" id="timerBox" hidden>
           <div class="timer-read" id="timerRead">0:00</div>
-          <p class="muted" id="timerNote" style="text-align:center;margin:2px 0 10px">計り忘れても大丈夫。あとから上で記録できます。</p>
+          <p class="muted" id="timerNote" style="text-align:center;margin:2px 0 10px"></p>
           <button class="primary" id="timerStart" type="button">⏱ 15分だけ始める</button>
           <div id="timerRunning" hidden>
             <button class="primary" id="timerStop" type="button">終わる</button>
@@ -263,160 +401,154 @@
           </div>
         </div>
       </div>
-      <div class="card" id="frontCard">
-        <h2>プロジェクトの次の項目</h2>
+      <div class="card" id="routineCard" hidden>
+        <div class="card-h"><h2>ルーティン</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>プロジェクトのメモの「# ルーティン」節から来ています。点は直近7日にやった日です。取り消しは PC のカンバン(前線タブ)でできます。</p>
+        <div id="routineList"></div>
+      </div>
+    </section>
+
+    <!-- プロジェクト(進行中のプロジェクトの一番手前の項目。見るだけ) -->
+    <section id="tab-project" hidden>
+      <div class="card">
+        <div class="card-h"><h2 id="frontTitle">進行中のプロジェクト</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>一番手前の項目の期日が近い順です。押すと、系列ごとの一番手前と次の項目が出ます。項目のチェックは PC のカンバン(前線)で。</p>
         <div id="frontList"></div>
-        <p class="muted" style="margin:8px 0 0">項目のチェックは PC のカンバン(前線)で。ルーティンの「今日やった」はここでも付けられます。</p>
-      </div>
-      <div class="card">
-        <h2>やることを追加</h2>
-        <input id="taskText" maxlength="300" autocomplete="off" enterkeyhint="send"
-               placeholder="例) レポート提出 #学校 !高">
-        <div class="row" id="taskDue" style="margin-top:8px"></div>
-        <input type="date" id="taskDueDate" aria-label="期限" style="margin-top:8px" hidden>
-        <label class="field">カテゴリ</label>
-        <div class="tags" id="taskCats"></div>
-        <p class="muted" id="taskCatsNote" style="margin:4px 0 0" hidden>PCでランチャーを起動すると、カンバンのカテゴリから選べるようになります。</p>
-        <p class="muted" style="margin:6px 0 0">PCのカンバンと同じ書き方(#タグ @カテゴリ !高 明日)も使えます。「明日」は今日から数えます。</p>
-        <div class="error" id="taskError"></div>
-        <button class="primary" id="taskSave">追加して送る</button>
-      </div>
-      <div class="card">
-        <h2 id="todayTitle">今日の予定</h2>
-        <div id="todayPlans"></div>
-        <div class="freshness" id="freshness"><span></span><button class="ghost small" id="refreshOutbox" type="button">更新</button></div>
-      </div>
-      <div class="card" id="tasksCard">
-        <h2>やること</h2>
-        <div id="todayTasks"></div>
-      </div>
-      <div class="card" id="upcomingCard">
-        <details id="upcomingBox">
-          <summary>これから6日の予定</summary>
-          <div id="upcoming"></div>
-        </details>
       </div>
     </section>
 
-    <!-- 日記 -->
+    <!-- 日記(日記と写真は別々に送る) -->
     <section id="tab-entry">
-      <div class="card">
-        <h2>いつの日記?</h2>
-        <div class="row" data-date-chips="entry"></div>
-        <input type="date" id="entryDate" aria-label="日付" style="margin-top:8px">
+      <div class="seg top" id="entrySeg">
+        <button type="button" data-seg="entry" aria-pressed="true">📔 日記</button>
+        <button type="button" data-seg="photo" aria-pressed="false">📷 写真</button>
       </div>
-      <div class="card">
-        <h2>きょうの気分</h2>
-        <div class="moods" id="moods"></div>
-        <label class="field">テーマ(なくてもOK)</label>
-        <div class="tags" id="entryTags"></div>
-        <label class="field" for="entryText">ひとこと・日記</label>
-        <textarea id="entryText" placeholder="思ったこと、あったこと。短くても大丈夫。"></textarea>
-        <div class="counter" id="entryCounter">0 / 4000</div>
-        <div class="photo-row">
-          <button class="ghost" id="photoPick" type="button">📷 写真をそえる</button>
-          <img id="photoPreview" class="photo-preview" alt="添える写真" hidden>
-          <button class="x" id="photoRemove" type="button" hidden>外す</button>
-          <input type="file" id="photoInput" accept="image/*" hidden>
+      <div data-pane="entry">
+        <div class="card">
+          <div class="card-h"><h2>いつの日記?</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+          <p class="help" hidden>PCに同じ日の日記があるときは、PCで取り込むときに「追記」か「置き換え」かを選べます。書きかけは自動でこの端末に残ります。</p>
+          <div class="row" data-date-chips="entry"></div>
+          <input type="date" id="entryDate" aria-label="日付" style="margin-top:8px">
         </div>
-        <p class="muted" id="photoNote" style="margin:6px 0 0">写真は1日1枚。送る前にスマホの中で小さくします。</p>
-        <div class="error" id="entryError"></div>
-        <button class="primary" id="entrySave">保存して送る</button>
-        <p class="muted">PCに同じ日の日記があるときは、PCで取り込むときに「追記」か「置き換え」かを選べます。</p>
+        <div class="card">
+          <h2>きょうの気分</h2>
+          <div class="moods" id="moods"></div>
+          <label class="field">テーマ(なくてもOK)</label>
+          <div class="tags" id="entryTags"></div>
+          <label class="field" for="entryText">ひとこと・日記</label>
+          <textarea id="entryText" placeholder="思ったこと、あったこと。短くても大丈夫。"></textarea>
+          <div class="counter" id="entryCounter">0 / 4000</div>
+          <div class="error" id="entryError"></div>
+          <button class="primary" id="entrySave">保存して送る</button>
+        </div>
       </div>
-    </section>
-
-    <!-- メモ(既存のメモの末尾に追記) -->
-    <section id="tab-memo" hidden>
-      <div class="card">
-        <h2>どのメモに追記する?</h2>
-        <select id="memoTarget" aria-label="追記するメモ"></select>
-        <p class="muted" id="memoTargetNote" style="margin:6px 0 0"></p>
-        <label class="field" for="memoText">追記する内容</label>
-        <textarea id="memoText" style="min-height:30vh" placeholder="思いついたこと、買いたいもの、アイデア…"></textarea>
-        <div class="counter" id="memoCounter">0 / 4000</div>
-        <div class="error" id="memoError"></div>
-        <button class="primary" id="memoSave">追記して送る</button>
-        <p class="muted">PCでメモアプリを開くと、選んだメモの末尾に「— スマホから 日時 —」の区切りつきで足されます(確認してから)。</p>
-      </div>
-    </section>
-
-    <!-- 睡眠 -->
-    <section id="tab-sleep" hidden>
-      <div class="card">
-        <h2>起きた日</h2>
-        <div class="row" data-date-chips="sleep"></div>
-        <input type="date" id="sleepDate" aria-label="起きた日" style="margin-top:8px">
-      </div>
-      <div class="card">
-        <div class="time-grid">
-          <div>
-            <label class="field" for="bedTime">寝た時刻</label>
-            <input type="time" id="bedTime">
+      <div data-pane="photo" hidden>
+        <div class="card">
+          <div class="card-h"><h2>写真を送る</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+          <p class="help" hidden>日記とは別に、その日の写真として送ります。1日1枚で、PCにすでにその日の写真があれば、取り込むときに入れ替えるかを選べます。送る前にスマホの中で小さくします(長い辺 1600px)。</p>
+          <label class="field" style="margin-top:0">いつの写真?</label>
+          <div class="row" data-date-chips="photo"></div>
+          <input type="date" id="photoDate" aria-label="写真の日付" style="margin-top:8px">
+          <div class="photo-row">
+            <button class="ghost" id="photoPick" type="button">📷 写真を選ぶ</button>
+            <img id="photoPreview" class="photo-preview" alt="送る写真" hidden>
+            <button class="x" id="photoRemove" type="button" hidden>外す</button>
+            <input type="file" id="photoInput" accept="image/*" hidden>
           </div>
-          <div>
-            <label class="field" for="wakeTime">起きた時刻</label>
-            <input type="time" id="wakeTime">
+          <div class="error" id="photoError"></div>
+          <button class="primary" id="photoSave">写真を送る</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 生活(睡眠と家計簿。上の切り替えでどちらか) -->
+    <section id="tab-life" hidden>
+      <div class="seg top" id="lifeSeg">
+        <button type="button" data-seg="sleep" aria-pressed="true">🛏️ 睡眠</button>
+        <button type="button" data-seg="money" aria-pressed="false">💴 家計簿</button>
+      </div>
+      <div data-pane="sleep">
+        <div class="card">
+          <h2>起きた日</h2>
+          <div class="row" data-date-chips="sleep"></div>
+          <input type="date" id="sleepDate" aria-label="起きた日" style="margin-top:8px">
+        </div>
+        <div class="card">
+          <div class="time-grid">
+            <div>
+              <label class="field" for="bedTime">寝た時刻</label>
+              <input type="time" id="bedTime">
+            </div>
+            <div>
+              <label class="field" for="wakeTime">起きた時刻</label>
+              <input type="time" id="wakeTime">
+            </div>
           </div>
+          <div class="row" style="margin-top:10px"><button class="ghost" id="wakeNow">☀️ いま起きた</button></div>
+          <p class="muted" style="margin-bottom:0">睡眠時間</p>
+          <div class="big" id="sleepDuration">—</div>
+          <label class="field">眠りの質(なくてもOK)</label>
+          <div class="row" id="quality"></div>
+          <div class="error" id="sleepError"></div>
+          <button class="primary" id="sleepSave">保存して送る</button>
         </div>
-        <div class="row" style="margin-top:10px"><button class="ghost" id="wakeNow">☀️ いま起きた</button></div>
-        <p class="muted" style="margin-bottom:0">睡眠時間</p>
-        <div class="big" id="sleepDuration">—</div>
-        <label class="field">眠りの質(なくてもOK)</label>
-        <div class="row" id="quality"></div>
-        <div class="error" id="sleepError"></div>
-        <button class="primary" id="sleepSave">保存して送る</button>
+        <div class="card">
+          <div class="card-h"><h2>最近の睡眠</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+          <p class="help" hidden>PCの日記から届いた数字です。オレンジは目標より短かった日です。</p>
+          <div id="sleepHistory"></div>
+        </div>
       </div>
-      <div class="card">
-        <h2>最近の睡眠(PCの日記から)</h2>
-        <div id="sleepHistory"></div>
+      <div data-pane="money" hidden>
+        <div class="card">
+          <div class="seg" id="moneyKind">
+            <button data-kind="expense" aria-pressed="true">💸 出費</button>
+            <button data-kind="income" aria-pressed="false">💰 収入</button>
+          </div>
+          <label class="field" for="amount">金額</label>
+          <input id="amount" inputmode="numeric" autocomplete="off" placeholder="¥0">
+          <div class="row" id="quick" style="margin-top:8px"></div>
+          <label class="field">カテゴリ</label>
+          <div class="cats" id="cats"></div>
+          <label class="field" for="memo">メモ(なくてもOK)</label>
+          <input id="memo" maxlength="100" autocomplete="off">
+          <label class="field">日付</label>
+          <div class="row" data-date-chips="money"></div>
+          <input type="date" id="moneyDate" aria-label="日付" style="margin-top:8px">
+          <div class="error" id="moneyError"></div>
+          <button class="primary" id="moneySave">保存して送る</button>
+        </div>
       </div>
     </section>
 
-    <!-- 家計簿 -->
-    <section id="tab-money" hidden>
-      <div class="card">
-        <div class="seg" id="moneyKind">
-          <button data-kind="expense" aria-pressed="true">💸 出費</button>
-          <button data-kind="income" aria-pressed="false">💰 収入</button>
-        </div>
-        <label class="field" for="amount">金額</label>
-        <input id="amount" inputmode="numeric" autocomplete="off" placeholder="¥0">
-        <div class="row" id="quick" style="margin-top:8px"></div>
-        <label class="field">カテゴリ</label>
-        <div class="cats" id="cats"></div>
-        <label class="field" for="memo">メモ(なくてもOK)</label>
-        <input id="memo" maxlength="100" autocomplete="off">
-        <label class="field">日付</label>
-        <div class="row" data-date-chips="money"></div>
-        <input type="date" id="moneyDate" aria-label="日付" style="margin-top:8px">
-        <div class="error" id="moneyError"></div>
-        <button class="primary" id="moneySave">保存して送る</button>
-      </div>
-    </section>
-
-    <!-- 送る -->
+    <!-- 送る(ヘッダーの「送る」から開く。下のタブには無い) -->
     <section id="tab-send" hidden>
+      <div class="send-head">
+        <button class="ghost small" id="closeSend" type="button">← 戻る</button>
+        <b>送る</b>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>まだ送っていない記録</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>送った記録は、PCの各アプリを開いたときに確認してから取り込まれます(勉強時間とルーティンは確認なし)。送ったあとは、この端末から本文・写真を消します。</p>
+        <div id="queue"></div>
+        <div class="error" id="sendError"></div>
+        <button class="primary" id="sendAll">OneDriveへ送る</button>
+        <button class="ghost" id="shareAll" style="width:100%;margin-top:8px">共有シートで「ファイルに保存」する</button>
+      </div>
       <div class="card">
         <h2>OneDrive</h2>
         <div id="account"></div>
       </div>
       <div class="card">
-        <h2>まだ送っていない記録</h2>
-        <div id="queue"></div>
-        <div class="error" id="sendError"></div>
-        <button class="primary" id="sendAll">OneDriveへ送る</button>
-        <button class="ghost" id="shareAll" style="width:100%;margin-top:8px">共有シートで「ファイルに保存」する</button>
-        <p class="muted">送った記録は、PCで日記アプリを開いたときに確認してから取り込まれます。送ったあとは、この端末から本文を消します。</p>
-      </div>
-      <div class="card">
-        <h2>送った記録(本文は残していません)</h2>
-        <div id="sent" class="muted"></div>
+        <details>
+          <summary>送った記録(本文は残していません)</summary>
+          <div id="sent" class="muted" style="margin-top:8px"></div>
+        </details>
       </div>
       <div class="card">
         <details>
           <summary>このアプリについて</summary>
-          <p class="muted">書いた内容は、送るまでこの端末の中だけに保存されます。送り先は、あなたの OneDrive の「アプリ/Diarium Pocket」の中(inbox・tasks・memos・study)だけです。勉強時間の記録は、PC で予定表アプリかランチャーを開くと確認なしで取り込まれます。</p>
+          <p class="muted">書いた内容は、送るまでこの端末の中だけに保存されます。送り先は、あなたの OneDrive の「アプリ/Diarium Pocket」の中(inbox・tasks・memos・study・routine)だけです。勉強時間とルーティンの記録は、PC で予定表アプリかランチャーを開くと確認なしで取り込まれます。</p>
+          <p class="muted">PCでランチャーを起動すると、予定・タスク・勉強時間・プロジェクト・睡眠の数字が「アプリ/Diarium Pocket/outbox」に書き出され、「やること」「勉強」「プロジェクト」「生活」タブに出ます。</p>
           <p class="muted">リダイレクトURI: <code id="redirectUri"></code></p>
           <p class="muted" id="version"></p>
         </details>
@@ -425,12 +557,12 @@
   </main>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="today" aria-selected="false"><span>🗓️</span><span>今日</span></button>
+    <button role="tab" data-tab="idea" aria-selected="false"><span>💡</span><span>アイデア</span></button>
+    <button role="tab" data-tab="todo" aria-selected="false"><span>✅</span><span>やること</span></button>
+    <button role="tab" data-tab="study" aria-selected="false"><span>📚</span><span>勉強</span></button>
+    <button role="tab" data-tab="project" aria-selected="false"><span>🧭</span><span>プロジェクト</span></button>
     <button role="tab" data-tab="entry" aria-selected="true"><span>📔</span><span>日記</span></button>
-    <button role="tab" data-tab="memo" aria-selected="false"><span>📝</span><span>メモ</span></button>
-    <button role="tab" data-tab="sleep" aria-selected="false"><span>🛏️</span><span>睡眠</span></button>
-    <button role="tab" data-tab="money" aria-selected="false"><span>💴</span><span>家計簿</span></button>
-    <button role="tab" data-tab="send" aria-selected="false"><span>📤</span><span>送る</span><i class="badge" id="badge"></i></button>
+    <button role="tab" data-tab="life" aria-selected="false"><span>🌙</span><span>生活</span></button>
   </nav>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

@@ -5,9 +5,13 @@
  * 送れるときに OneDrive へ1件1ファイルで送る(日記宛ては inbox/、タスクは tasks/)。
  * 送れたら端末から本文・写真を消し、「送った記録」には日付と種類だけを残す。
  *
- * 逆向きに、PC(ランチャー)が書いた outbox/pocket_today.json(今日の予定・タスク・
- * 睡眠の数字)を読んで「今日」「睡眠」タブに出す。読めたものは端末にしまうので、
- * 電波が無いときやサインインが切れているときも、前回の内容を表示できる。
+ * 逆向きに、PC(ランチャー)が書いた outbox/pocket_today.json(予定・タスク・勉強時間・
+ * プロジェクトの前線・睡眠の数字)を読んで「やること」「勉強」「プロジェクト」「生活」タブに出す。
+ * 読めたものは端末にしまうので、電波が無いときやサインインが切れているときも、前回の内容を表示できる。
+ *
+ * タブ(2026-10-12 に「今日」を分けた): アイデア(タスク追加・メモ追記)/ やること(予定・タスク。見るだけ)/
+ * 勉強(勉強時間・ルーティン)/ プロジェクト(前線。見るだけ)/ 日記(日記・写真は別々に送る)/ 生活(睡眠・家計簿)。
+ * 「送る」はヘッダーのボタンから開く。使い方の説明は各カードの「?」の中にだけ置く。
  *
  * 可用性のための方針:
  *  - どの通信が失敗しても、書く・保存する・前回の情報を見ることは止めない。
@@ -19,7 +23,7 @@
 
   const C = window.PocketCore;
   const A = window.PocketAuth;
-  const APP_VERSION = "2026-10-07.2";
+  const APP_VERSION = "2026-10-12.1";
 
   const KEYS = {
     queue: "pocket.queue",
@@ -35,7 +39,9 @@
     // ルーティン: 送った「やった」の控え(プロジェクト・名前・日付・ID だけ。PC の集計に入るまで点に足すため。14日で消す)
     routineLocal: "pocket.routine.local",
   };
-  const TABS = ["today", "entry", "memo", "sleep", "money", "send"];
+  const TABS = ["idea", "todo", "study", "project", "entry", "life", "send"];
+  // 以前の版のタブ名 → 今のタブ(と切り替えの側)
+  const OLD_TABS = { today: ["todo"], memo: ["idea", "memo"], sleep: ["life", "sleep"], money: ["life", "money"] };
   const MAX_SENT_LOG = 30;
   const OUTBOX_REFRESH_MS = 10 * 60 * 1000;
   const DRAFT_PHOTO_KEY = "draft-photo";
@@ -159,7 +165,10 @@
   const $ = (id) => document.getElementById(id);
   const today = () => C.localDateStr(new Date());
   const prefs = Object.assign(
-    { bedTime: "", category: {}, lastTab: "today", taskCategoryId: null, memoNoteId: null, studyAskDismissed: null },
+    {
+      bedTime: "", category: {}, lastTab: "todo", taskCategoryId: null, memoNoteId: null, studyAskDismissed: null,
+      seg: { idea: "task", entry: "entry", life: "sleep" },
+    },
     load(KEYS.prefs, {}),
   );
   const savePrefs = () => save(KEYS.prefs, prefs);
@@ -191,22 +200,79 @@
   }
 
   // ---------- タブ ----------
+  // 「送る」は下のタブに無いので、開いても prefs.lastTab は変えない(閉じると元のタブに戻る)。
+  prefs.seg = Object.assign({ idea: "task", entry: "entry", life: "sleep" }, prefs.seg);
+  function currentTab() {
+    return TABS.find((t) => !$(`tab-${t}`).hidden) || null;
+  }
   function showTab(name) {
-    if (!TABS.includes(name)) name = "today";
+    if (OLD_TABS[name]) {
+      const [tab, side] = OLD_TABS[name];
+      if (side) prefs.seg[tab] = side;
+      name = tab;
+    }
+    if (!TABS.includes(name)) name = "todo";
     document.querySelectorAll("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
     TABS.forEach((t) => ($(`tab-${t}`).hidden = t !== name));
-    prefs.lastTab = name;
+    if (name !== "send") prefs.lastTab = name;
     savePrefs();
-    if (name === "send") renderSend();
-    if (name === "today") { renderToday(); renderTaskCats(); renderTimer(); }
-    if (name === "sleep") renderSleepHistory();
-    if (name === "memo") renderMemoTargets();
+    if (name === "todo") todoDay = null; // 開き直したら今日から
+    renderTab(name);
+    syncSegs();
     window.scrollTo(0, 0);
   }
+  function renderTab(name) {
+    if (name === "send") renderSend();
+    if (name === "idea") { renderTaskCats(); renderMemoTargets(); }
+    if (name === "todo") renderTodo();
+    if (name === "study") { renderStudy(); renderRoutines(); renderTimer(); }
+    if (name === "project") renderFront();
+    if (name === "life") renderSleepHistory();
+  }
+  // PC から届いた情報を使う表示をすべて描き直す(更新で新しい outbox を読んだとき)
+  function renderOutboxViews() {
+    renderTodo();
+    renderStudy();
+    renderRoutines();
+    renderFront();
+    renderTaskCats();
+    renderMemoTargets();
+    renderSleepHistory();
+  }
   document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  $("openSend").addEventListener("click", () => showTab("send"));
+  $("closeSend").addEventListener("click", () => showTab(prefs.lastTab));
+
+  // ---------- タブの中の切り替え(アイデア: タスク/メモ、日記: 日記/写真、生活: 睡眠/家計簿) ----------
+  function syncSegs() {
+    Object.keys(prefs.seg).forEach((tab) => {
+      const section = $(`tab-${tab}`);
+      const side = prefs.seg[tab];
+      section.querySelectorAll(".seg.top button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.seg === side)));
+      section.querySelectorAll("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== side));
+    });
+  }
+  Object.keys(prefs.seg).forEach((tab) => {
+    $(`tab-${tab}`).querySelectorAll(".seg.top button").forEach((b) => b.addEventListener("click", () => {
+      prefs.seg[tab] = b.dataset.seg;
+      savePrefs();
+      syncSegs();
+    }));
+  });
+
+  // ---------- 「?」(使い方の説明は押したときだけ出す) ----------
+  document.querySelectorAll(".help-btn").forEach((b) => {
+    const help = b.closest(".card").querySelector(".help");
+    if (!help) return;
+    b.addEventListener("click", () => {
+      const open = help.hidden;
+      help.hidden = !open;
+      b.setAttribute("aria-expanded", String(open));
+    });
+  });
 
   // ---------- 日付チップ(今日/昨日) ----------
-  const dateInputs = { entry: $("entryDate"), sleep: $("sleepDate"), money: $("moneyDate"), study: $("studyDate") };
+  const dateInputs = { entry: $("entryDate"), sleep: $("sleepDate"), money: $("moneyDate"), study: $("studyDate"), photo: $("photoDate") };
   function setupDateChips(kind, onChange) {
     const input = dateInputs[kind];
     const holder = document.querySelector(`[data-date-chips="${kind}"]`);
@@ -231,7 +297,7 @@
   }
 
   // =====================================================================
-  // 今日(タスクの追加・PCから届いた予定とやること)
+  // アイデア: タスクの追加
   // =====================================================================
   let taskDue = null; // null | "YYYY-MM-DD"
   const dueChoices = [
@@ -299,7 +365,7 @@
     taskDue = null;
     $("taskDueDate").hidden = true;
     syncDue();
-    renderToday();
+    renderTodo();
   }
   $("taskSave").addEventListener("click", saveTask);
   $("taskText").addEventListener("keydown", (e) => {
@@ -320,41 +386,92 @@
     return el("span", { class: "due", text: shortDate(due) });
   }
 
-  function planRow(item) {
+  // 項目の先頭の日付(「10/15(木) 」など)。日付はバッジで見せるので、本文からは外す
+  function stripLeadDate(text) {
+    const s = String(text || "");
+    return s.replace(/^\d{1,2}\/\d{1,2}(\([^)]*\))?\s*/, "") || s;
+  }
+
+  // 押すと1行に切った文が全文になる
+  const toggleOpen = (e) => e.currentTarget.classList.toggle("open");
+
+  // =====================================================================
+  // やること(PCから届いた予定とタスク。見るだけ)
+  // 予定は7日の帯で日を選び、その日の時間帯(6〜24時)と一覧を出す。タスクは期限で分けて並べる。
+  // =====================================================================
+  let todoDay = null; // 帯で選んだ日(null なら今日)
+  const TL_START = 6 * 60;
+  const TL_END = 24 * 60;
+  function hmToMin(s) {
+    const hm = C.parseHHMM(s);
+    return hm ? hm.h * 60 + hm.min : null;
+  }
+  function planMinutes(item) {
+    const a = hmToMin(item.start), b = hmToMin(item.end);
+    if (a === null || b === null) return 0;
+    return b > a ? b - a : b + 24 * 60 - a;
+  }
+  const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+
+  function planRow(item, past) {
     const time = item.start ? `${item.start}〜${item.end || ""}` : "時間未定";
-    return el("div", { class: "plan" }, [
+    return el("div", { class: "plan", on: { click: toggleOpen } }, [
       el("div", { class: "time", text: time }),
-      el("div", { class: "what" }, [
+      el("div", { class: "what clip" + (past ? " past" : "") }, [
         document.createTextNode(item.name || "(名前なし)"),
         item.category ? el("span", { class: "cat", text: item.category }) : null,
       ]),
     ]);
   }
 
-  function renderToday() {
-    renderStudy();
-    renderFront();
+  function dayLine(items, isToday) {
+    const span = TL_END - TL_START;
+    const line = el("div", { class: "tl", role: "img", "aria-label": "その日の時間帯(6時〜24時)" });
+    items.forEach((i) => {
+      let a = hmToMin(i.start), b = hmToMin(i.end);
+      if (a === null) return;
+      if (b === null || b <= a) b = TL_END; // 日をまたぐ予定は24時まで
+      a = Math.max(TL_START, a);
+      b = Math.min(TL_END, b);
+      if (b <= a) return;
+      line.append(el("i", { class: "blk", style: `left:${(a - TL_START) / span * 100}%;width:${(b - a) / span * 100}%` }));
+    });
+    const now = nowMinutes();
+    if (isToday && now >= TL_START) line.append(el("i", { class: "now", style: `left:${(now - TL_START) / span * 100}%` }));
+    const scale = el("div", { class: "tl-scale" }, [6, 9, 12, 15, 18, 21, 24].map((h) => el("span", { text: String(h) })));
+    return [line, scale];
+  }
+
+  const tstat = (label, n, warn) => el("div", { class: "tstat" + (warn ? " warn" : "") }, [el("small", { text: label }), el("b", { text: String(n) })]);
+
+  function taskRow(x, showDue) {
+    const tags = (x.tags || []).length ? el("span", { class: "tg", text: `  ${x.tags.map((g) => "#" + g).join(" ")}` }) : null;
+    return el("div", { class: "task", on: { click: toggleOpen } }, [
+      x.priority === 3 ? el("span", { class: "prio", text: "!" }) : null,
+      el("div", { class: "what clip" }, [document.createTextNode(x.title), tags]),
+      showDue ? dueBadge(x.due_date) : null,
+    ]);
+  }
+
+  function renderTodo() {
     const ob = outbox();
     const t = today();
-    $("todayTitle").textContent = `今日の予定 ${shortDate(t)}`;
-    const plans = $("todayPlans");
-    const tasksBox = $("todayTasks");
-    const upcoming = $("upcoming");
-    plans.replaceChildren();
-    tasksBox.replaceChildren();
-    upcoming.replaceChildren();
+    const week = $("week"), lineBox = $("dayLine"), plans = $("dayPlans"), tasksBox = $("todoTasks");
+    [week, lineBox, plans, tasksBox].forEach((n) => n.replaceChildren());
+    $("dayTitle").textContent = "";
+    $("dayCount").textContent = "";
 
     const pendingTasks = queue().filter((r) => r.kind === "task");
     if (pendingTasks.length) {
-      tasksBox.append(el("p", { class: "muted", text: `スマホから送信待ちのタスク ${pendingTasks.length}件(「送る」タブ)` }));
+      tasksBox.append(el("p", { class: "muted", style: "margin:0 0 6px", text: `スマホから送信待ちのタスク ${pendingTasks.length}件` }));
     }
 
     const fresh = $("freshness").querySelector("span");
     if (!ob) {
-      plans.append(el("p", { class: "muted", text: "PCでランチャーを起動すると、今日の予定とやることがここに届きます(「送る」タブでサインインしておいてください)。" }));
+      week.hidden = true;
+      plans.append(el("p", { class: "muted", text: "PCでランチャーを起動すると、予定とタスクがここに届きます(「送る」でサインインしておいてください)。" }));
       fresh.textContent = "まだPCから受け取っていません";
       $("freshness").classList.remove("stale");
-      $("upcomingCard").hidden = true;
       $("tasksCard").hidden = !pendingTasks.length;
       return;
     }
@@ -365,55 +482,76 @@
     fresh.textContent = stale ? `PCで ${genLabel} に更新(今日の分ではありません)` : `PCで ${genLabel} に更新`;
     $("freshness").classList.toggle("stale", stale);
 
-    // 予定
+    // 予定(今日から先の日だけ。帯で選んだ日を出す)
     const sched = ob.schedule || {};
+    const days = sched.available ? (sched.days || []).filter((d) => d.date >= t) : [];
+    week.hidden = !days.length;
     if (!sched.available) {
       plans.append(el("p", { class: "muted", text: `予定表を読めませんでした(${sched.reason || "不明"})。` }));
-      $("upcomingCard").hidden = true;
+    } else if (!days.length) {
+      plans.append(el("p", { class: "muted", text: "今日の予定はまだ届いていません。PCでランチャーを起動してください。" }));
     } else {
-      const days = sched.days || [];
-      const day = days.find((d) => d.date === t);
-      if (!day) {
-        plans.append(el("p", { class: "muted", text: "今日の予定はまだ届いていません。PCでランチャーを起動してください。" }));
-      } else if (!day.items.length) {
-        plans.append(el("p", { class: "muted", text: "今日の予定はありません。" }));
-      } else {
-        day.items.forEach((i) => plans.append(planRow(i)));
-      }
-      const later = days.filter((d) => d.date > t);
-      $("upcomingCard").hidden = !later.length;
-      const busy = later.filter((d) => d.items.length);
-      if (!busy.length) upcoming.append(el("p", { class: "muted", text: "これからの予定はありません。" }));
-      busy.forEach((d) => {
-        upcoming.append(el("div", { class: "day-h", text: shortDate(d.date) }));
-        d.items.forEach((i) => upcoming.append(planRow(i)));
+      if (!days.some((d) => d.date === todoDay)) todoDay = days[0].date;
+      const loadOf = (d) => (d.items || []).reduce((s, i) => s + planMinutes(i), 0);
+      const maxLoad = Math.max(60, ...days.map(loadOf));
+      days.forEach((d) => {
+        const [y, m, dd] = d.date.split("-").map(Number);
+        const n = (d.items || []).length;
+        const b = el("button", {
+          type: "button", class: "day" + (d.date === t ? " is-today" : "") + (n ? "" : " free"),
+          "aria-pressed": String(d.date === todoDay), "aria-label": `${shortDate(d.date)} 予定${n}件`,
+        }, [
+          el("span", { class: "w", text: d.date === t ? "今日" : WEEK[new Date(y, m - 1, dd).getDay()] }),
+          el("span", { class: "d", text: String(dd) }),
+          el("span", { class: "load" }, [el("i", { style: `width:${Math.round(loadOf(d) / maxLoad * 100)}%` })]),
+        ]);
+        b.addEventListener("click", () => { todoDay = d.date; renderTodo(); });
+        week.append(b);
       });
-      const free = later.filter((d) => !d.items.length).map((d) => shortDate(d.date));
-      if (free.length && busy.length) upcoming.append(el("p", { class: "muted", style: "margin:10px 0 0", text: `予定のない日: ${free.join("・")}` }));
+      const day = days.find((d) => d.date === todoDay);
+      const items = day.items || [];
+      const isToday = day.date === t;
+      $("dayTitle").textContent = isToday ? `今日 ${shortDate(day.date)}` : shortDate(day.date);
+      $("dayCount").textContent = items.length ? `${items.length}件` : "";
+      lineBox.append(...dayLine(items, isToday));
+      if (!items.length) plans.append(el("p", { class: "muted", style: "margin:6px 0 0", text: isToday ? "今日の予定はありません。" : "予定はありません。" }));
+      const now = nowMinutes();
+      items.forEach((i) => {
+        const a = hmToMin(i.start), b = hmToMin(i.end);
+        plans.append(planRow(i, isToday && a !== null && b !== null && b > a && b <= now));
+      });
     }
 
-    // やること
+    // タスク(期限で分ける)
     const tk = ob.tasks || {};
     if (!tk.available) {
       tasksBox.append(el("p", { class: "muted", text: `カンバンを読めませんでした(${tk.reason || "不明"})。` }));
       return;
     }
-    const overdue = (tk.items || []).filter((x) => x.due_date && x.due_date < t).length;
-    const dueToday = (tk.items || []).filter((x) => x.due_date === t).length;
-    tasksBox.append(el("div", { class: "stat" }, [
-      el("span", {}, [document.createTextNode("未完了 "), el("b", { text: String(tk.open_count || 0) })]),
-      el("span", {}, [document.createTextNode("期限切れ "), el("b", { text: String(overdue) })]),
-      el("span", {}, [document.createTextNode("今日 "), el("b", { text: String(dueToday) })]),
+    const items = tk.items || [];
+    const tomorrow = C.addDays(t, 1);
+    const weekEnd = C.addDays(t, 7);
+    const overdue = items.filter((x) => x.due_date && x.due_date < t).length;
+    tasksBox.append(el("div", { class: "tstats" }, [
+      tstat("期限切れ", overdue, overdue > 0),
+      tstat("今日", items.filter((x) => x.due_date === t).length),
+      tstat("未完了", tk.open_count || 0),
     ]));
-    if (!(tk.items || []).length) {
-      tasksBox.append(el("p", { class: "muted", text: "期限の近いタスクはありません。" }));
-    }
-    (tk.items || []).forEach((x) => {
-      tasksBox.append(el("div", { class: "task" }, [
-        x.priority === 3 ? el("span", { class: "prio", text: "!" }) : null,
-        el("div", { class: "what", text: x.title + ((x.tags || []).length ? `  ${x.tags.map((g) => "#" + g).join(" ")}` : "") }),
-        dueBadge(x.due_date),
-      ]));
+    if (!items.length) tasksBox.append(el("p", { class: "muted", style: "margin:4px 0 0", text: "期限の近いタスクはありません。" }));
+    const groups = [
+      ["期限切れ", (x) => x.due_date && x.due_date < t, false],
+      ["今日", (x) => x.due_date === t, false],
+      ["明日", (x) => x.due_date === tomorrow, false],
+      ["7日以内", (x) => x.due_date && x.due_date > tomorrow && x.due_date <= weekEnd, true],
+      ["そのあと・期限なし", () => true, true],
+    ];
+    const shown = new Set();
+    groups.forEach(([label, test, showDue]) => {
+      const list = items.filter((x) => !shown.has(x) && test(x));
+      if (!list.length) return;
+      list.forEach((x) => shown.add(x));
+      tasksBox.append(el("div", { class: "grp", text: label }));
+      list.forEach((x) => tasksBox.append(taskRow(x, showDue)));
     });
     if (tk.truncated) tasksBox.append(el("p", { class: "muted", text: "ほかにもあります(PCのカンバンで確認できます)。" }));
   }
@@ -504,13 +642,7 @@
       ]));
     });
 
-    let todayText = `今日 ${C.formatMinutes(w.todayReported)}`;
-    if (ob && ob.today === t && st && Array.isArray(st.forecast) && st.forecast[0]) {
-      const gen = new Date(ob.generated_at);
-      const at = isNaN(gen) ? "" : `(PCで ${pad(gen.getHours())}:${pad(gen.getMinutes())} に計算)`;
-      todayText += `・このあと勉強できる時間 ${C.formatMinutes(st.forecast[0].capacity_minutes)}${at}`;
-    }
-    $("studyToday").textContent = todayText;
+    $("studyToday").textContent = `今日 ${C.formatMinutes(w.todayReported)}`;
 
     const y = C.addDays(t, -1);
     const localY = studyLocal().some((r) => r.date === y);
@@ -521,6 +653,7 @@
   }
 
   // ---------- 計測(開始時刻を端末に置き、差で数える。閉じても・ロックしても狂わない) ----------
+  // 2026-10-12 から画面には出さない(#timerBox を hidden のまま)。仕組みと保存済みの状態はそのまま残す。
   let timerTick = null;
   function timerState() { return load(KEYS.studyTimer, null); }
   function clockText(ms) {
@@ -637,46 +770,111 @@
     list.push({ id: rec.id, project: projectId, routine: key, date, at: rec.created_at });
     save(KEYS.routineLocal, list);
     toast(`${date === today() ? "今日" : shortDate(date)}の「${key}」を記録しました`);
-    renderFront();
+    renderRoutines();
     return true;
   }
 
-  function routineBlock(ln, recordIds) {
+  // 勉強タブの「ルーティン」カード。ルーティンのあるプロジェクトごとに並べる
+  function renderRoutines() {
+    const box = $("routineList");
+    box.replaceChildren();
+    const ob = outbox();
+    const fr = ob && ob.front;
+    const lanes = (fr && fr.available && Array.isArray(fr.lanes) ? fr.lanes : [])
+      .filter((ln) => Array.isArray(ln.routines) && ln.routines.some((v) => v && v.key));
+    $("routineCard").hidden = !lanes.length;
     const t = today();
-    const box = el("div", { class: "routines" }, [el("div", { class: "muted rt-head", text: "ルーティン・直近7日" })]);
-    (ln.routines || []).forEach((v) => {
-      if (!v || !v.key) return;
-      const w = C.routineWindow(ln.id, v, routineLocal(), recordIds, t, 7);
-      const dots = el("span", { class: "rt-dots" }, w.days.map((d) => el("i", { class: d.done ? "on" : "", text: d.done ? "●" : "・" })));
-      const btn = el("button", {
-        class: "chip rt-btn", type: "button", text: w.todayDone ? "✓ 今日" : "今日やった",
-        "aria-pressed": w.todayDone ? "true" : "false",
+    const recordIds = (fr && fr.routine_record_ids) || [];
+    lanes.forEach((ln) => {
+      box.append(el("div", { class: "rt-proj", text: ln.title || "(無題)" }));
+      ln.routines.forEach((v) => {
+        if (!v || !v.key) return;
+        const w = C.routineWindow(ln.id, v, routineLocal(), recordIds, t, 7);
+        const dots = el("span", { class: "rt-dots", "aria-label": `直近7日で${w.count}日` },
+          w.days.map((d) => el("i", { class: d.done ? "on" : "", text: d.done ? "●" : "・" })));
+        const btn = el("button", {
+          class: "chip rt-btn", type: "button", text: w.todayDone ? "✓ 今日" : "今日やった",
+          "aria-pressed": w.todayDone ? "true" : "false",
+        });
+        if (w.todayDone) btn.disabled = true;
+        else btn.addEventListener("click", () => saveRoutine(ln.id, v.key, t));
+        box.append(el("div", { class: "rt-row" }, [
+          el("div", { class: "rt-name" }, [el("b", { text: v.key }), v.text ? el("small", { class: "muted", text: v.text }) : null]),
+          dots, el("span", { class: "muted rt-count", text: `${w.count}日` }), btn,
+        ]));
+        if (!w.yesterdayDone) {
+          const y = C.addDays(t, -1);
+          const yb = el("button", { class: "rt-y", type: "button", text: `昨日 ${shortDate(y)} もやった` });
+          yb.addEventListener("click", () => saveRoutine(ln.id, v.key, y));
+          box.append(yb);
+        }
+        if (w.pending) box.append(el("div", { class: "muted rt-note", text: `PCに未反映 ${w.pending}件を含む` }));
       });
-      if (w.todayDone) btn.disabled = true;
-      else btn.addEventListener("click", () => saveRoutine(ln.id, v.key, t));
-      const row = el("div", { class: "rt-row" }, [
-        el("div", { class: "rt-name" }, [el("b", { text: v.key }), v.text ? el("small", { class: "muted", text: v.text }) : null]),
-        dots, el("span", { class: "muted rt-count", text: `${w.count}日` }), btn,
-      ]);
-      box.append(row);
-      if (!w.yesterdayDone) {
-        const y = C.addDays(t, -1);
-        const yb = el("button", { class: "rt-y", type: "button", text: `昨日 ${shortDate(y)} もやった` });
-        yb.addEventListener("click", () => saveRoutine(ln.id, v.key, y));
-        box.append(yb);
-      }
-      if (w.pending) box.append(el("div", { class: "muted rt-note", text: `PCに未反映 ${w.pending}件を含む` }));
     });
-    box.append(el("div", { class: "muted rt-note", text: "取り消しはPCのカンバン(前線タブ)でできます。" }));
-    return box;
   }
 
   // =====================================================================
-  // 前線(進行中のプロジェクトの一番手前の項目。見るだけ)
+  // プロジェクト(進行中のプロジェクトの一番手前の項目。見るだけ)
+  // 1件1行(名前・一番手前の期日・進み具合・一番手前の項目)。一番手前の期日が近い順。
+  // 押すと系列ごとの一番手前と次の項目を開く。
   // =====================================================================
+  const openLanes = new Set();
+
+  // 一番手前の項目(系列があれば、待ちでない系列の一番手前のうち期日の最も早いもの)
+  function laneFront(ln) {
+    const branches = Array.isArray(ln.branches) ? ln.branches : [];
+    const fronts = branches.length > 1
+      ? branches.filter((b) => !b.waiting_for && b.front).map((b) => b.front)
+      : (ln.front ? [ln.front] : []);
+    const dated = fronts.filter((f) => f.date).sort((a, b) => a.date.localeCompare(b.date));
+    return dated[0] || fronts[0] || null;
+  }
+
+  // 期日のバッジ(過ぎていても責めない色で)
+  function frontBadge(date) {
+    if (!date) return null;
+    const t = today();
+    if (date < t) return el("span", { class: "late", text: `${shortDate(date)}・過ぎ` });
+    if (date === t) return el("span", { class: "due soon", text: "今日" });
+    if (date === C.addDays(t, 1)) return el("span", { class: "due", text: "明日" });
+    return el("span", { class: "due", text: shortDate(date) });
+  }
+
+  const laneName = (ln) => (ln.title || "(無題)").replace(/^\d+年[春夏秋冬]\s+/, "");
+
+  function laneBody(ln) {
+    const body = el("div", { class: "pj-body" });
+    const branches = Array.isArray(ln.branches) ? ln.branches : [];
+    const frontLine = (it) => el("div", { class: "br-front" }, [el("span", { text: stripLeadDate(it.text) }), frontBadge(it.date)]);
+    if (ln.kind === "明文化") {
+      body.append(el("div", { class: "br" }, [el("div", { class: "br-front" }, [el("span", { text: `次の一歩: ${ln.next_step || "(まだありません)"}` })])]));
+    } else if (branches.length > 1) {
+      branches.forEach((b) => {
+        const kids = [el("div", { class: "br-h" }, [
+          el("span", {}, [el("b", { text: b.name }), b.ahead ? el("span", { class: "ahead", text: "先取り" }) : null]),
+          el("span", { class: "prog", text: `${b.done}/${b.total}` }),
+        ])];
+        if (b.waiting_for) kids.push(el("div", { class: "br-next", text: `「${stripLeadDate(b.waiting_for)}」が済んだら始まります` }));
+        else if (b.front) {
+          kids.push(frontLine(b.front));
+          (b.next || []).slice(0, 1).forEach((n) => kids.push(el("div", { class: "br-next", text: `次: ${stripLeadDate(n.text)}` })));
+        } else kids.push(el("div", { class: "br-next", text: "この系列はすべて済み" }));
+        body.append(el("div", { class: "br" }, kids));
+      });
+    } else if (ln.front) {
+      const kids = [frontLine(ln.front)];
+      (ln.next || []).forEach((n) => kids.push(el("div", { class: "br-next", text: `次: ${stripLeadDate(n.text)}` })));
+      body.append(el("div", { class: "br" }, kids));
+    } else {
+      body.append(el("div", { class: "br-next", text: "すべて終わりました。" }));
+    }
+    return body;
+  }
+
   function renderFront() {
     const box = $("frontList");
     box.replaceChildren();
+    $("frontTitle").textContent = "進行中のプロジェクト";
     const ob = outbox();
     const fr = ob && ob.front;
     if (!ob) {
@@ -689,48 +887,37 @@
     }
     const lanes = Array.isArray(fr.lanes) ? fr.lanes : [];
     if (!lanes.length) box.append(el("p", { class: "muted", text: "進行中のプロジェクトはありません。" }));
-    const t = today();
-    lanes.forEach((ln) => {
-      const progress = ln.total ? `${ln.done}/${ln.total}` : "";
-      const node = el("div", { class: "lane" }, [
-        el("div", { class: "head" }, [el("b", { text: ln.title || "(無題)" }), el("span", { class: "muted", text: progress })]),
-      ]);
-      if (Array.isArray(ln.routines) && ln.routines.some((v) => v && v.key)) {
-        node.append(routineBlock(ln, fr.routine_record_ids || []));
-      }
+    else $("frontTitle").textContent = `進行中のプロジェクト ${lanes.length}件`;
+    // 一番手前の期日が近い順(期日の無いものは後ろ。同じなら PC の順のまま)
+    const rows = lanes.map((ln) => ({ ln, f: laneFront(ln) })).sort((a, b) => {
+      const da = a.f && a.f.date, db = b.f && b.f.date;
+      if (da && db) return da.localeCompare(db);
+      return da ? -1 : db ? 1 : 0;
+    });
+    rows.forEach(({ ln, f }) => {
+      const key = ln.id || ln.title;
       const branches = Array.isArray(ln.branches) ? ln.branches : [];
-      const badgeOf = (it, ahead) => (it && it.date
-        ? (it.date < t ? el("span", { class: "late", text: `${ahead ? "期日 " : ""}${shortDate(it.date)}・過ぎています` })
-          : el("span", { class: "due", text: `${ahead ? "期日 " : ""}${shortDate(it.date)}` }))
-        : null);
-      if (ln.kind === "明文化") {
-        node.append(el("div", { class: "next", text: `次の一歩: ${ln.next_step || "(まだありません)"}` }));
-      } else if (branches.length > 1) {
-        // 系列(分岐)ごとに一番手前を見せる(2026-10-07)
-        branches.forEach((b) => {
-          node.append(el("div", { class: "branch" }, [
-            el("b", { text: `● ${b.name}${b.ahead ? "・先取り" : ""}` }),
-            el("span", { class: "muted", text: ` ${b.done}/${b.total}` }),
-          ]));
-          if (b.waiting_for) {
-            node.append(el("div", { class: "next", text: `待ち: 「${b.waiting_for}」が済んだら始まります` }));
-          } else if (b.front) {
-            node.append(el("div", { class: "front" }, [el("div", { text: b.front.text }), badgeOf(b.front, b.ahead)]));
-            (b.next || []).slice(0, 1).forEach((n) => node.append(el("div", { class: "next", text: `次: ${n.text}` })));
-          } else {
-            node.append(el("div", { class: "next", text: "この系列はすべて済み" }));
-          }
-        });
-      } else if (ln.front) {
-        const badge = ln.front.date
-          ? (ln.front.date < t ? el("span", { class: "late", text: `${shortDate(ln.front.date)}・日付を過ぎています` })
-            : el("span", { class: "due", text: shortDate(ln.front.date) }))
-          : null;
-        node.append(el("div", { class: "front" }, [el("div", { text: ln.front.text }), badge]));
-        (ln.next || []).forEach((n) => node.append(el("div", { class: "next", text: `次: ${n.text}` })));
-      } else {
-        node.append(el("div", { class: "next", text: "すべて終わりました。" }));
-      }
+      let item;
+      if (ln.kind === "明文化") item = `次の一歩: ${ln.next_step || "(まだありません)"}`;
+      else if (f) item = stripLeadDate(f.text) + (branches.length > 1 ? `  ほか${branches.length - 1}系列` : "");
+      else item = "すべて終わりました。";
+      const open = openLanes.has(key);
+      const node = el("div", { class: "pj" + (open ? " open" : "") });
+      const row = el("button", { class: "pj-row", type: "button", "aria-expanded": String(open) }, [
+        el("span", { class: "pj-name clip", text: laneName(ln) }),
+        el("span", { class: "pj-meta" }, [
+          f ? frontBadge(f.date) : null,
+          ln.total ? el("span", { class: "prog", text: `${ln.done}/${ln.total}` }) : null,
+          el("span", { class: "caret", "aria-hidden": "true", text: "▶" }),
+        ]),
+        el("span", { class: "pj-item clip", text: item }),
+      ]);
+      row.addEventListener("click", () => {
+        if (openLanes.has(key)) openLanes.delete(key); else openLanes.add(key);
+        renderFront();
+      });
+      node.append(row);
+      if (open) node.append(laneBody(ln));
       box.append(node);
     });
   }
@@ -753,10 +940,7 @@
       save(KEYS.outboxCheckedAt, Date.now());
       if (r.ok && r.data && r.data.format === "diarium-pocket-outbox") {
         save(KEYS.outbox, r.data);
-        renderToday();
-        renderTaskCats();
-        renderMemoTargets();
-        renderSleepHistory();
+        renderOutboxViews();
         if (interactive) toast("PCの最新の情報にしました");
       } else if (r.reason === "missing") {
         if (interactive) toast("PCからまだ届いていません。ランチャーを起動してください");
@@ -832,7 +1016,32 @@
     updateCounter();
   })();
 
-  // ---------- 写真(1日1枚。選んだらすぐ縮小して、下書きとして端末にしまう) ----------
+  let entrySaving = false;
+  $("entrySave").addEventListener("click", () => {
+    if (entrySaving) return;
+    entrySaving = true;
+    try { saveEntry(); } finally { entrySaving = false; }
+  });
+
+  function saveEntry() {
+    const data = { date: dateInputs.entry.value, mood: entryMood, text: $("entryText").value, tags: [...entryTags] };
+    if (!enqueue("entry", data, $("entryError"), { quiet: true })) return;
+    toast("日記を保存しました");
+    entryMood = null;
+    entryTags.clear();
+    $("entryText").value = "";
+    drop(KEYS.draft);
+    dateInputs.entry.value = today();
+    syncEntryDate();
+    syncMoods();
+    syncTags();
+    updateCounter();
+  }
+
+  // =====================================================================
+  // 写真(2026-10-12 から日記とは別に送る。1日1枚。選んだらすぐ縮小して、下書きとして端末にしまう)
+  // PC の日記アプリは写真を日記とは別の表に持つので、その日の日記が無くても取り込める。
+  // =====================================================================
   let draftPhoto = null;
   let previewUrl = null;
   function showPhoto(blob) {
@@ -842,7 +1051,7 @@
     $("photoPreview").hidden = !blob;
     $("photoRemove").hidden = !blob;
     if (blob) $("photoPreview").src = previewUrl; else $("photoPreview").removeAttribute("src");
-    $("photoPick").textContent = blob ? "📷 写真を変える" : "📷 写真をそえる";
+    $("photoPick").textContent = blob ? "📷 写真を変える" : "📷 写真を選ぶ";
   }
 
   async function shrinkPhoto(file) {
@@ -875,23 +1084,24 @@
     return blob;
   }
 
+  const syncPhotoDate = setupDateChips("photo");
   $("photoPick").addEventListener("click", () => $("photoInput").click());
-  // 写真の縮小が終わる前に「保存」を押されても写真が抜け落ちないよう、処理中の約束を覚えておく
+  // 写真の縮小が終わる前に「送る」を押されても写真が抜け落ちないよう、処理中の約束を覚えておく
   let photoPending = null;
   $("photoInput").addEventListener("change", () => {
     const file = $("photoInput").files && $("photoInput").files[0];
     $("photoInput").value = "";
     if (!file) return;
-    $("entryError").textContent = "";
+    $("photoError").textContent = "";
     $("photoPick").textContent = "📷 小さくしています…";
     const job = (async () => {
       try {
         const blob = await shrinkPhoto(file);
         showPhoto(blob);
-        try { await Photos.put(DRAFT_PHOTO_KEY, blob); } catch (_) { /* 下書きに残せなくても、このまま保存はできる */ }
+        try { await Photos.put(DRAFT_PHOTO_KEY, blob); } catch (_) { /* 下書きに残せなくても、このまま送れる */ }
       } catch (e) {
         showPhoto(draftPhoto);
-        $("entryError").textContent = e.message || "写真を読み込めませんでした。";
+        $("photoError").textContent = e.message || "写真を読み込めませんでした。";
       }
     })();
     photoPending = job;
@@ -899,66 +1109,48 @@
   });
   $("photoRemove").addEventListener("click", () => { showPhoto(null); Photos.del(DRAFT_PHOTO_KEY); });
 
-  let entrySaving = false;
-  $("entrySave").addEventListener("click", async () => {
-    if (entrySaving) return;
-    entrySaving = true;
-    const label = $("entrySave").textContent;
+  let photoSaving = false;
+  $("photoSave").addEventListener("click", async () => {
+    if (photoSaving) return;
+    photoSaving = true;
+    const label = $("photoSave").textContent;
     try {
       if (photoPending) {
-        $("entrySave").textContent = "写真を準備しています…";
-        $("entrySave").disabled = true;
+        $("photoSave").textContent = "写真を準備しています…";
+        $("photoSave").disabled = true;
         await photoPending;
       }
-      await saveEntry();
+      await savePhoto();
     } finally {
-      entrySaving = false;
-      $("entrySave").textContent = label;
-      $("entrySave").disabled = false;
+      photoSaving = false;
+      $("photoSave").textContent = label;
+      $("photoSave").disabled = false;
     }
   });
 
-  async function saveEntry() {
-    const data = { date: dateInputs.entry.value, mood: entryMood, text: $("entryText").value, tags: [...entryTags] };
+  async function savePhoto() {
     const photo = draftPhoto;
-    if (photo) {
-      const problem = C.validate("photo", { date: data.date, mime: "image/jpeg", size: photo.size }, today());
-      if (problem) { $("entryError").textContent = problem; return; }
-    }
-    const entryProblem = C.validate("entry", data, today());
-    if (entryProblem) { $("entryError").textContent = entryProblem; return; }
-    let photoRec = null;
-    if (photo) {
-      // 写真を先に端末へしまう。しまえなければ日記も保存せず、写真を残したまま知らせる
-      photoRec = C.buildRecord("photo", { date: data.date, mime: "image/jpeg", size: photo.size }, new Date());
-      try {
-        await Photos.put(photoRec.id, photo);
-      } catch (e) {
-        $("entryError").textContent = `${e.message} 日記はまだ保存していません。写真を外すか、もう一度お試しください。`;
-        return;
-      }
-    }
-    // 日記と写真を同じ回で送れるよう、両方をキューに入れてから送信を始める
-    const records = [C.buildRecord("entry", data, new Date())];
-    if (photoRec) records.push(photoRec);
-    if (!enqueueRecords(records, $("entryError"))) {
-      if (photoRec) Photos.del(photoRec.id);
+    const data = { date: dateInputs.photo.value, mime: "image/jpeg", size: photo ? photo.size : 0 };
+    const problem = C.validate("photo", data, today());
+    $("photoError").textContent = problem || "";
+    if (problem) return;
+    // 写真を先に端末へしまう。しまえなければ送らず、選んだ写真は残したまま知らせる
+    const rec = C.buildRecord("photo", data, new Date());
+    try {
+      await Photos.put(rec.id, photo);
+    } catch (e) {
+      $("photoError").textContent = `${e.message} もう一度お試しください。`;
       return;
     }
-    toast(photoRec ? "日記と写真を保存しました" : "日記を保存しました");
-    if (photo) {
-      Photos.del(DRAFT_PHOTO_KEY);
-      showPhoto(null);
+    if (!enqueueRecord(rec, $("photoError"), { quiet: true })) {
+      Photos.del(rec.id);
+      return;
     }
-    entryMood = null;
-    entryTags.clear();
-    $("entryText").value = "";
-    drop(KEYS.draft);
-    dateInputs.entry.value = today();
-    syncEntryDate();
-    syncMoods();
-    syncTags();
-    updateCounter();
+    toast(`${shortDate(data.date)} の写真を保存しました`);
+    Photos.del(DRAFT_PHOTO_KEY);
+    showPhoto(null);
+    dateInputs.photo.value = today();
+    syncPhotoDate();
   }
 
   // =====================================================================
@@ -976,9 +1168,12 @@
       sel.append(el("option", { value: "", text: "(メモの一覧がまだ届いていません)" }));
       sel.disabled = true;
       $("memoTargetNote").textContent = "PCでランチャーを起動すると、メモアプリのメモから選べるようになります。";
+      $("memoTargetNote").hidden = false;
+      $("memoListAt").textContent = "";
       $("memoSave").disabled = true;
       return;
     }
+    $("memoTargetNote").hidden = true;
     sel.disabled = false;
     $("memoSave").disabled = false;
     if (!notes.some((n) => n.id === prefs.memoNoteId)) prefs.memoNoteId = notes[0].id;
@@ -990,8 +1185,8 @@
     });
     const ob = outbox();
     const gen = ob ? new Date(ob.generated_at) : null;
-    $("memoTargetNote").textContent = gen && !isNaN(gen)
-      ? `メモの一覧: PCで ${gen.getMonth() + 1}/${gen.getDate()} ${pad(gen.getHours())}:${pad(gen.getMinutes())} に更新(「今日」タブの「更新」で最新に)`
+    $("memoListAt").textContent = gen && !isNaN(gen)
+      ? ` メモの一覧は PCで ${gen.getMonth() + 1}/${gen.getDate()} ${pad(gen.getHours())}:${pad(gen.getMinutes())} に書き出したものです(「やること」の「更新」で最新に)。`
       : "";
   }
   $("memoTarget").addEventListener("change", () => { prefs.memoNoteId = $("memoTarget").value || null; savePrefs(); });
@@ -1201,12 +1396,15 @@
   }
 
   function updatePill() {
+    // 未送信の件数は「送る」ボタンのバッジに出すので、ここには困ったときだけ出す
     const pill = $("netPill");
     const n = queue().length;
-    if (!storageOk) { pill.textContent = "端末に保存できません"; pill.className = "pill warn"; return; }
-    if (!navigator.onLine) { pill.textContent = n ? `オフライン・未送信 ${n}` : "オフライン"; pill.className = "pill warn"; return; }
-    pill.textContent = n ? (lastProblems.length ? `送れない記録あり・未送信 ${n}` : `未送信 ${n}`) : "すべて送信済み";
-    pill.className = n ? "pill warn" : "pill";
+    pill.hidden = false;
+    pill.className = "pill warn";
+    if (!storageOk) { pill.textContent = "端末に保存できません"; return; }
+    if (!navigator.onLine) { pill.textContent = "オフライン"; return; }
+    if (n && lastProblems.length) { pill.textContent = "送れない記録あり"; return; }
+    pill.hidden = true;
   }
 
   function blobToBase64(blob) {
@@ -1281,13 +1479,13 @@
     lastProblems = problems;
     $("sendError").textContent = problems.join("\n");
     updatePill();
-    if (problems.length && !interactive) setTimeout(() => toast("送れなかった記録があります(「送る」タブで確認できます)"), 2900);
+    if (problems.length && !interactive) setTimeout(() => toast("送れなかった記録があります(上の「送る」で確認できます)"), 2900);
     if (sendAgain) {
       sendAgain = false;
       setTimeout(() => sendAll(false), 0);
     }
     if (!$("tab-send").hidden) renderSend();
-    if (!$("tab-today").hidden) renderToday();
+    if (currentTab() === "todo") renderTodo();
   }
 
   function trySendQuietly() {
@@ -1391,9 +1589,9 @@
   window.addEventListener("offline", updatePill);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
-    [syncEntryDate, syncSleepDate, syncMoneyDate, syncStudyDate].forEach((f) => f());
-    if (!$("tab-today").hidden) { renderToday(); renderTimer(); }
-    if (!$("tab-sleep").hidden) renderSleepHistory();
+    [syncEntryDate, syncSleepDate, syncMoneyDate, syncStudyDate, syncPhotoDate].forEach((f) => f());
+    const tab = currentTab();
+    if (tab && tab !== "send") renderTab(tab);
     trySendQuietly();
     refreshOutboxIfOld();
     checkForUpdate();
@@ -1429,7 +1627,7 @@
       if (r.error) { showTab("send"); $("sendError").textContent = r.error; return; }
       toast("サインインしました");
       if (r.afterAction === "send") { showTab("send"); await sendAll(true); refreshOutbox(false); return; }
-      if (r.afterAction === "refresh") { showTab("today"); await refreshOutbox(true); trySendQuietly(); return; }
+      if (r.afterAction === "refresh") { showTab("todo"); await refreshOutbox(true); trySendQuietly(); return; }
       showTab("send");
       refreshOutbox(false);
       return;
@@ -1441,7 +1639,8 @@
 
   // 検証用(画面には影響しない)
   window.__pocket = {
-    queue, version: APP_VERSION, photos: Photos, fileTextFor, renderToday, renderSleepHistory, refreshOutbox,
+    queue, version: APP_VERSION, photos: Photos, fileTextFor, renderTodo, renderOutboxViews, renderSleepHistory, refreshOutbox,
+    showTab, renderRoutines,
     enqueue: (k, d) => enqueue(k, d, { textContent: "" }),
     studyLocal, saveStudy: (d, m, s) => saveStudy(d, m, s, { textContent: "" }), renderStudy, renderTimer,
     renderFront, timerState, stopTimer, routineLocal, saveRoutine,
