@@ -21,6 +21,8 @@
   const MIN_SLEEP_MINUTES = 1;
   const MAX_SLEEP_MINUTES = 20 * 60;
   const BED_DATE_SAME_DAY_HOUR = 12;
+  // 日記の「今日」が切り替わる時刻(PC の dialy1.DAY_START_HOUR と同じ)。0〜4時は前の日の続き
+  const DAY_START_HOUR = 4;
 
   const MOODS = [
     { key: "very_good", emoji: "😄", name: "とてもよい" },
@@ -70,6 +72,11 @@
 
   function localDateStr(d) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  /** 日記上の「今日」。DAY_START_HOUR 時より前は前日として扱う。 */
+  function diaryDateStr(d) {
+    return localDateStr(new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() - DAY_START_HOUR, d.getMinutes()));
   }
 
   function addDays(dateStr, days) {
@@ -360,7 +367,7 @@
     THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT, MAX_MEMO_TEXT, MAX_STUDY_MINUTES, STUDY_QUICK_MINUTES,
     MAX_ROUTINE_KEY, MAX_ROUTINE_BACK_DAYS,
     folderFor, studyWindow, routineWindow, elapsedMinutes,
-    localDateStr, addDays, isoWithOffset, isValidDateStr, parseHHMM, sleepMinutes, formatMinutes,
+    DAY_START_HOUR, localDateStr, diaryDateStr, addDays, isoWithOffset, isValidDateStr, parseHHMM, sleepMinutes, formatMinutes,
     normalizeNumber, validate, newId, buildRecord, fileName, serialize, summarize,
   };
 });

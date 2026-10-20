@@ -164,6 +164,9 @@
 
   const $ = (id) => document.getElementById(id);
   const today = () => C.localDateStr(new Date());
+  // 日記・睡眠・出費・写真の「今日」(0〜4時は前の日の続き)。未来かどうかは暦どおりの today() で見る
+  const diaryToday = () => C.diaryDateStr(new Date());
+  const DIARY_DAY_KINDS = new Set(["entry", "sleep", "money", "photo"]);
   const prefs = Object.assign(
     {
       bedTime: "", category: {}, lastTab: "todo", taskCategoryId: null, memoNoteId: null, studyAskDismissed: null,
@@ -276,9 +279,10 @@
   function setupDateChips(kind, onChange) {
     const input = dateInputs[kind];
     const holder = document.querySelector(`[data-date-chips="${kind}"]`);
+    const base = DIARY_DAY_KINDS.has(kind) ? diaryToday : today;
     const chips = [
-      ["今日", () => today()],
-      ["昨日", () => C.addDays(today(), -1)],
+      ["今日", () => base()],
+      ["昨日", () => C.addDays(base(), -1)],
     ].map(([label, value]) => {
       const b = el("button", { class: "chip", type: "button", text: label });
       b.addEventListener("click", () => { input.value = value(); sync(); onChange && onChange(); });
@@ -291,7 +295,7 @@
       chips.forEach((c) => c.setAttribute("aria-pressed", String(c._value() === input.value)));
     }
     input.addEventListener("change", () => { sync(); onChange && onChange(); });
-    input.value = today();
+    input.value = base();
     sync();
     return sync;
   }
@@ -1031,7 +1035,7 @@
     entryTags.clear();
     $("entryText").value = "";
     drop(KEYS.draft);
-    dateInputs.entry.value = today();
+    dateInputs.entry.value = diaryToday();
     syncEntryDate();
     syncMoods();
     syncTags();
@@ -1149,7 +1153,7 @@
     toast(`${shortDate(data.date)} の写真を保存しました`);
     Photos.del(DRAFT_PHOTO_KEY);
     showPhoto(null);
-    dateInputs.photo.value = today();
+    dateInputs.photo.value = diaryToday();
     syncPhotoDate();
   }
 
@@ -1335,7 +1339,7 @@
     savePrefs();
     $("amount").value = "";
     $("memo").value = "";
-    dateInputs.money.value = today();
+    dateInputs.money.value = diaryToday();
     syncMoneyDate();
   });
 
