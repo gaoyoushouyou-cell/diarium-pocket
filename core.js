@@ -62,10 +62,13 @@
   // ルーティン(2026-10-07。PC の project/project_app/core/routines.py と同じ上限)
   const MAX_ROUTINE_KEY = 40;
   const MAX_ROUTINE_BACK_DAYS = 31;
-  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク", memo: "メモ", study: "勉強時間", routine: "ルーティン" };
-  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅", memo: "📝", study: "📚", routine: "🔁" };
+  // ルーティーン(2026-11-11。Opus のルーティーンタブ。PC の kanban/kanban/routine_core.py と同じ上限)
+  const MAX_HABIT_COUNT = 99;
+  const MAX_HABIT_BACK_DAYS = 62;
+  const KIND_LABELS = { entry: "日記", sleep: "睡眠", expense: "出費", income: "収入", photo: "写真", task: "タスク", memo: "メモ", study: "勉強時間", routine: "ルーティン", habit: "ルーティーン" };
+  const KIND_EMOJI = { entry: "📔", sleep: "🛏️", expense: "💸", income: "💰", photo: "📷", task: "✅", memo: "📝", study: "📚", routine: "🔁", habit: "🔁" };
   // 送り先のフォルダ(OneDrive の「アプリ/Diarium Pocket/」の中)
-  const FOLDER_FOR = { task: "tasks", memo: "memos", study: "study", routine: "routine" };
+  const FOLDER_FOR = { task: "tasks", memo: "memos", study: "study", routine: "routine", habit: "habits" };
   const folderFor = (kind) => FOLDER_FOR[kind] || "inbox";
 
   const pad = (n) => String(n).padStart(2, "0");
@@ -166,6 +169,13 @@
       const key = String(data.routine || "").trim();
       if (!key || key.length > MAX_ROUTINE_KEY) return "ルーティンの名前が正しくありません。";
       if (data.date < addDays(todayStr, -MAX_ROUTINE_BACK_DAYS)) return `${MAX_ROUTINE_BACK_DAYS}日より前の日には付けられません。`;
+      return null;
+    }
+    if (kind === "habit") {
+      // Opus のルーティーンの ID と、その日の回数(値。重なったら新しい入力が使われる)
+      if (!Number.isInteger(data.routine) || data.routine <= 0) return "ルーティーンが正しくありません。";
+      if (!Number.isInteger(data.count) || data.count < 0 || data.count > MAX_HABIT_COUNT) return `回数は0〜${MAX_HABIT_COUNT}回です。`;
+      if (data.date < addDays(todayStr, -MAX_HABIT_BACK_DAYS)) return `${MAX_HABIT_BACK_DAYS}日より前の日は直せません。`;
       return null;
     }
     if (kind === "study") {
@@ -278,6 +288,71 @@
     };
   }
 
+  // ---------- ルーティーン(2026-11-11) ----------
+  // 周期の計算は PC の routine_core.period_bounds と同じ。日付は "YYYY-MM-DD"、終わりは翌日(含まない)。
+  const dowMon = (dateStr) => { const [y, m, d] = dateStr.split("-").map(Number); return (new Date(y, m - 1, d).getDay() + 6) % 7; };
+  const daysBetween = (a, b) => {
+    const [y1, m1, d1] = a.split("-").map(Number), [y2, m2, d2] = b.split("-").map(Number);
+    return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+  };
+  function periodBounds(spec, dateStr) {
+    const p = spec && typeof spec === "object" ? spec : { type: "daily" };
+    if (p.type === "weekly") {
+      const s = addDays(dateStr, -((dowMon(dateStr) - (p.weekday || 0) + 7) % 7));
+      return [s, addDays(s, 7)];
+    }
+    if (p.type === "monthly") {
+      const day = p.day || 1;
+      let [y, m, d] = dateStr.split("-").map(Number);
+      if (d < day) { m -= 1; if (m < 1) { m = 12; y -= 1; } }
+      const s = `${y}-${pad(m)}-${pad(day)}`;
+      const ny = m === 12 ? y + 1 : y, nm = m === 12 ? 1 : m + 1;
+      return [s, `${ny}-${pad(nm)}-${pad(day)}`];
+    }
+    if (p.type === "every_n" && isValidDateStr(p.start) && p.n > 0) {
+      const k = Math.floor(daysBetween(p.start, dateStr) / p.n);
+      const s = addDays(p.start, k * p.n);
+      return [s, addDays(s, p.n)];
+    }
+    if (p.type === "weekdays" && Array.isArray(p.days) && p.days.length) {
+      const wd = dowMon(dateStr);
+      const back = Math.min(...p.days.map((w) => (wd - w + 7) % 7));
+      const s = addDays(dateStr, -back);
+      const swd = dowMon(s);
+      const fwd = Math.min(...p.days.map((w) => ((w - swd + 7) % 7) || 7));
+      return [s, addDays(s, fwd)];
+    }
+    return [dateStr, addDays(dateStr, 1)];
+  }
+
+  /**
+   * ルーティーン1つの「今日の回数」と「今の周期の回数」。PC から届いた日ごとの {count, at}(routine.days)と、
+   * スマホで押した記録(local: [{id, routine, date, count, at}])を、日ごとに「記録時刻が新しい方」でまとめる
+   * (PC の routine_core.effective_counts と同じ規則)。pending は PC にまだ入っていないスマホの記録の数。
+   */
+  function habitView(routine, period, local, todayStr) {
+    const best = {};
+    const ms = (at) => { const t = Date.parse(at); return isNaN(t) ? 0 : t; };
+    Object.entries((routine && routine.days) || {}).forEach(([d, v]) => {
+      if (v && Number.isInteger(v.count)) best[d] = { count: v.count, t: ms(v.at), local: false };
+    });
+    let pending = 0;
+    (local || []).forEach((r) => {
+      if (!r || r.routine !== routine.id || !isValidDateStr(r.date)) return;
+      const t = ms(r.at);
+      const cur = best[r.date];
+      if (!cur || t > cur.t) { best[r.date] = { count: r.count, t, local: true }; pending += 1; }
+    });
+    const [s, e] = periodBounds(period, todayStr);
+    let periodCount = 0;
+    Object.entries(best).forEach(([d, v]) => { if (d >= s && d < e && d <= todayStr) periodCount += v.count; });
+    const target = Math.max(1, routine.target || 1);
+    return {
+      todayCount: best[todayStr] ? best[todayStr].count : 0, periodCount, target,
+      achieved: periodCount >= target, start: s, end: addDays(e, -1), pending,
+    };
+  }
+
   /** 計測の開始(ms)から終了(ms)までの分(四捨五入。負にはしない)。 */
   function elapsedMinutes(startMs, endMs) {
     return Math.max(0, Math.round((endMs - startMs) / 60000));
@@ -310,6 +385,10 @@
     if (kind === "expense" || kind === "income") clean.memo = (clean.memo || "").trim();
     if (kind === "routine") {
       const out = { project: clean.project, routine: String(clean.routine || "").trim(), date: clean.date };
+      return { format: FORMAT, v: VERSION, id: id || newId(), kind, created_at: isoWithOffset(now), data: out };
+    }
+    if (kind === "habit") {
+      const out = { routine: clean.routine, count: clean.count, date: clean.date, title: String(clean.title || "").slice(0, 80) };
       return { format: FORMAT, v: VERSION, id: id || newId(), kind, created_at: isoWithOffset(now), data: out };
     }
     if (kind === "study") {
@@ -355,6 +434,9 @@
     if (record.kind === "routine") {
       return `${d.date.slice(5).replace("-", "/")} ${d.routine} をやった`;
     }
+    if (record.kind === "habit") {
+      return `${d.date.slice(5).replace("-", "/")} ${d.title || "ルーティーン"} を ${d.count}回に`;
+    }
     if (record.kind === "study") {
       return `${d.date.slice(5).replace("-", "/")} に ${formatMinutes(d.minutes)}${d.source === "timer" ? "(計測)" : ""}`;
     }
@@ -365,8 +447,8 @@
     FORMAT, VERSION, MAX_TEXT_LENGTH, MAX_MEMO, MAX_AMOUNT, MOODS, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
     EXPENSE_QUICK_AMOUNTS, INCOME_QUICK_AMOUNTS, SLEEP_QUALITY, KIND_LABELS, KIND_EMOJI,
     THEME_TAGS, PHOTO_MIMES, MAX_PHOTO_BYTES, MAX_TASK_TEXT, MAX_MEMO_TEXT, MAX_STUDY_MINUTES, STUDY_QUICK_MINUTES,
-    MAX_ROUTINE_KEY, MAX_ROUTINE_BACK_DAYS,
-    folderFor, studyWindow, routineWindow, elapsedMinutes,
+    MAX_ROUTINE_KEY, MAX_ROUTINE_BACK_DAYS, MAX_HABIT_COUNT, MAX_HABIT_BACK_DAYS,
+    folderFor, studyWindow, routineWindow, periodBounds, habitView, elapsedMinutes,
     DAY_START_HOUR, localDateStr, diaryDateStr, addDays, isoWithOffset, isValidDateStr, parseHHMM, sleepMinutes, formatMinutes,
     normalizeNumber, validate, newId, buildRecord, fileName, serialize, summarize,
   };

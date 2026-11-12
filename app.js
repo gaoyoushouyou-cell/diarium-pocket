@@ -23,7 +23,7 @@
 
   const C = window.PocketCore;
   const A = window.PocketAuth;
-  const APP_VERSION = "2026-10-12.1";
+  const APP_VERSION = "2026-11-11.1";
 
   const KEYS = {
     queue: "pocket.queue",
@@ -38,6 +38,8 @@
     studyTimer: "pocket.study.timer",
     // ルーティン: 送った「やった」の控え(プロジェクト・名前・日付・ID だけ。PC の集計に入るまで点に足すため。14日で消す)
     routineLocal: "pocket.routine.local",
+    // ルーティーン(2026-11-11): 押した回数の控え(ルーティーンID・日付・回数・押した時刻。PC の記録と新しい方でまとめるため)
+    habitLocal: "pocket.habit.local",
   };
   const TABS = ["idea", "todo", "study", "project", "entry", "life", "send"];
   // 以前の版のタブ名 → 今のタブ(と切り替えの側)
@@ -458,6 +460,7 @@
   }
 
   function renderTodo() {
+    renderHabits();
     const ob = outbox();
     const t = today();
     const week = $("week"), lineBox = $("dayLine"), plans = $("dayPlans"), tasksBox = $("todoTasks");
@@ -778,8 +781,10 @@
     return true;
   }
 
-  // 勉強タブの「ルーティン」カード。ルーティンのあるプロジェクトごとに並べる
+  // 勉強タブの「ルーティン」カード。2026-11-11 に Opus のルーティーン(やることタブ)へ移したので、もう出さない。
+  // (以前に送った「やった」は PC が取り込み続けるので、送る仕組みと saveRoutine は残してある)
   function renderRoutines() {
+    if (!$("routineCard")) return;
     const box = $("routineList");
     box.replaceChildren();
     const ob = outbox();
@@ -815,6 +820,81 @@
         if (w.pending) box.append(el("div", { class: "muted rt-note", text: `PCに未反映 ${w.pending}件を含む` }));
       });
     });
+  }
+
+  // =====================================================================
+  // ルーティーン(Opus のルーティーンタブで「Pocket」にチェックした列。2026-11-11)
+  // 押すと「その日の回数」を habits/ フォルダへ送る(Opus・日記・ランチャーが確認なしで取り込む)。
+  // PC から届いた日ごとの回数と、このスマホで押した回数は「押した時刻が新しい方」でまとめる(PC と同じ規則)。
+  // =====================================================================
+  const HABIT_LOCAL_DAYS = 45;
+
+  function habitLocal() {
+    const list = load(KEYS.habitLocal, []);
+    return Array.isArray(list)
+      ? list.filter((r) => r && Number.isInteger(r.routine) && Number.isInteger(r.count) && C.isValidDateStr(r.date) && typeof r.at === "string")
+      : [];
+  }
+
+  function saveHabit(rt, date, count) {
+    const data = { routine: rt.id, count, date, title: rt.title };
+    const problem = C.validate("habit", data, today());
+    if (problem) { toast(problem); return false; }
+    const rec = C.buildRecord("habit", data, new Date());
+    if (!enqueueRecord(rec, { textContent: "" }, { quiet: true })) { toast("端末に保存できませんでした"); return false; }
+    const since = C.addDays(today(), -HABIT_LOCAL_DAYS);
+    const list = habitLocal().filter((r) => r.date >= since);
+    list.push({ id: rec.id, routine: rt.id, date, count, at: rec.created_at });
+    save(KEYS.habitLocal, list);
+    toast(count ? `「${rt.title}」を今日 ${count}回 にしました` : `「${rt.title}」の今日の分を外しました`);
+    renderHabits();
+    return true;
+  }
+
+  function renderHabits() {
+    const box = $("habitList");
+    if (!box) return;
+    box.replaceChildren();
+    const ob = outbox();
+    const R = ob && ob.routines;
+    const groups = R && R.available && Array.isArray(R.groups) ? R.groups.filter((g) => Array.isArray(g.routines) && g.routines.length) : [];
+    $("habitCard").hidden = !groups.length;
+    const t = diaryToday();
+    const local = habitLocal();
+    groups.forEach((g) => {
+      box.append(el("div", { class: "rt-proj", text: `${g.name} ・ ${g.period_label || ""}` }));
+      g.routines.forEach((rt) => {
+        const v = C.habitView(rt, g.period, local, t);
+        const noun = (g.period && g.period.type === "daily") ? "今日" : (g.period_noun || "今の期間");
+        const badge = el("span", {
+          class: "hb-badge" + (v.achieved ? " done" : ""), text: `${noun} ${v.periodCount}/${v.target}${v.achieved ? " ✓" : ""}`,
+          "aria-label": `${shortDate(v.start)}〜${shortDate(v.end)} の回数 ${v.periodCount}、目標 ${v.target}`,
+        });
+        let ctrl;
+        if (v.target === 1) {
+          ctrl = el("button", {
+            class: "chip rt-btn", type: "button", "aria-pressed": String(v.todayCount > 0),
+            text: v.todayCount > 0 ? "✓ やった" : "今日やった",
+          });
+          ctrl.addEventListener("click", () => saveHabit(rt, t, v.todayCount > 0 ? 0 : 1));
+        } else {
+          const minus = el("button", { class: "chip", type: "button", text: "−", "aria-label": "1回減らす" });
+          const plus = el("button", { class: "chip", type: "button", text: "+", "aria-label": "1回増やす" });
+          minus.disabled = v.todayCount <= 0;
+          minus.addEventListener("click", () => saveHabit(rt, t, Math.max(0, v.todayCount - 1)));
+          plus.addEventListener("click", () => saveHabit(rt, t, v.todayCount + 1));
+          ctrl = el("div", { class: "hb-step" }, [minus, el("b", { text: `${v.todayCount}回` }), plus]);
+        }
+        box.append(el("div", { class: "rt-row" }, [
+          el("div", { class: "rt-name" }, [el("b", { text: rt.title }), rt.memo ? el("small", { class: "muted", text: rt.memo }) : null]),
+          badge, ctrl,
+        ]));
+        if (v.pending) box.append(el("div", { class: "muted rt-note", text: `PCに未反映 ${v.pending}件を含む` }));
+      });
+    });
+    if (R && R.available && R.today && R.today !== t && groups.length) {
+      box.append(el("p", { class: "muted rt-note", text: "PC の情報は今日より前のものです(周期と回数はこのスマホで計算しています)。" }));
+    }
   }
 
   // =====================================================================
@@ -1647,6 +1727,6 @@
     showTab, renderRoutines,
     enqueue: (k, d) => enqueue(k, d, { textContent: "" }),
     studyLocal, saveStudy: (d, m, s) => saveStudy(d, m, s, { textContent: "" }), renderStudy, renderTimer,
-    renderFront, timerState, stopTimer, routineLocal, saveRoutine,
+    renderFront, timerState, stopTimer, routineLocal, saveRoutine, habitLocal, saveHabit, renderHabits,
   };
 })();

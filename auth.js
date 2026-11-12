@@ -20,8 +20,9 @@
   const GRAPH_APPROOT = "https://graph.microsoft.com/v1.0/me/drive/special/approot:/";
   // 書き込めるのは inbox/(日記宛て)・tasks/(カンバン宛て)・memos/(メモ宛て)・study/(勉強時間。予定表・ランチャーが
   // 確認なしで取り込む)・routine/(ルーティン。カンバン・ランチャー・プロジェクトアプリが確認なしで取り込む)だけ。
+  // habits/(ルーティーン。2026-11-11。Opus・日記・ランチャーが確認なしで取り込む)。
   // 読むのは outbox/ だけ。
-  const UPLOAD_FOLDERS = ["inbox", "tasks", "memos", "study", "routine"];
+  const UPLOAD_FOLDERS = ["inbox", "tasks", "memos", "study", "routine", "habits"];
   const TOKENS_KEY = "pocket.auth";
   const PKCE_KEY = "pocket.pkce";
 

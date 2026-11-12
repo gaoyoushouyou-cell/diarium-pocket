@@ -284,6 +284,12 @@
     .rt-btn:disabled { opacity: .75; }
     .rt-y { display: block; margin: -2px 0 4px; padding: 2px 0; background: none; border: 0; color: var(--accent); font-size: 12px; text-decoration: underline; }
     .rt-note { font-size: 11px; margin-top: 2px; }
+    /* ルーティーン(やることタブ。2026-11-11) */
+    .hb-badge { font-size: 12px; color: var(--sub); background: var(--bg); border-radius: 999px; padding: 1px 8px; white-space: nowrap; flex: none; }
+    .hb-badge.done { color: var(--accent); background: var(--accent-pale); font-weight: 600; }
+    .hb-step { display: flex; align-items: center; gap: 2px; flex: none; }
+    .hb-step button { min-width: 36px; min-height: 34px; padding: 0; font-size: 18px; line-height: 1; }
+    .hb-step b { min-width: 2.6em; text-align: center; font-size: 14px; }
     .late { font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap;
             background: color-mix(in srgb, var(--amber) 25%, var(--card)); color: var(--text); }
   </style>
@@ -345,9 +351,14 @@
         <div id="dayPlans"></div>
         <div class="freshness" id="freshness"><span></span><button class="ghost small" id="refreshOutbox" type="button">更新</button></div>
       </div>
+      <div class="card" id="habitCard" hidden>
+        <div class="card-h"><h2>ルーティーン</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
+        <p class="help" hidden>PC の Opus で「Pocket」にチェックした列のルーティーンです。押すとすぐ送ります。PC(Opus)・日記アプリと同じ記録で、同じ日を何か所かで付けたときは、一番あとに押したものが使われます。周期(今日・今週など)と目標回数は Opus で決めます。1日は4:00で切り替わります。</p>
+        <div id="habitList"></div>
+      </div>
       <div class="card" id="tasksCard">
         <div class="card-h"><h2>タスク</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
-        <p class="help" hidden>期限の近い(または優先度「高」の)未完了タスクだけが届きます。完了のチェックは PC のカンバンで。タスクを押すと全文が出ます。</p>
+        <p class="help" hidden>期限の近い(または優先度「高」の)未完了タスクだけが届きます。Opus で「Pocket」のチェックを外した列のタスクは届きません。完了のチェックは PC のカンバンで。タスクを押すと全文が出ます。</p>
         <div id="todoTasks"></div>
       </div>
     </section>
@@ -401,11 +412,7 @@
           </div>
         </div>
       </div>
-      <div class="card" id="routineCard" hidden>
-        <div class="card-h"><h2>ルーティン</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
-        <p class="help" hidden>プロジェクトのメモの「# ルーティン」節から来ています。点は直近7日にやった日です。取り消しは PC のカンバン(前線タブ)でできます。</p>
-        <div id="routineList"></div>
-      </div>
+      <!-- 旧「ルーティン」(プロジェクトメモの # ルーティン)は 2026-11-11 に Opus のルーティーンへ移した(やることタブ) -->
     </section>
 
     <!-- プロジェクト(進行中のプロジェクトの一番手前の項目。見るだけ) -->
