@@ -247,6 +247,22 @@
     .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
     .quick .chip { border-radius: 10px; font-weight: 600; min-height: 46px; padding: 6px 4px; }
     details.more { margin-top: 12px; }
+    /* 勉強: 週次レビュー(2026-11-18。PC の Claude が書いたものを見るだけ) */
+    details.review { margin: 12px 0; }
+    details.review > summary {
+      list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px;
+      align-items: center; margin: 0;
+    }
+    details.review > summary::-webkit-details-marker { display: none; }
+    .review-top { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--sub); }
+    .review-chip { font-size: 12px; padding: 1px 9px; border-radius: 999px; font-weight: 600; }
+    .review-chip.steady { background: color-mix(in srgb, var(--income) 18%, var(--card)); color: var(--income); }
+    .review-chip.look { background: color-mix(in srgb, var(--amber) 22%, var(--card)); color: var(--text); }
+    .review-new { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .review-head { grid-column: 1; font-weight: 600; line-height: 1.45; }
+    .review-arrow { grid-column: 2; grid-row: 1 / span 2; color: var(--sub); transition: transform .2s; }
+    details.review[open] .review-arrow { transform: rotate(90deg); }
+    #reviewHost { margin-top: 4px; }
     /* プロジェクト: 1件1行、押すと系列 */
     .pj { border-top: 1px solid var(--border); }
     .pj:first-child { border-top: 0; }
@@ -365,6 +381,14 @@
 
     <!-- 勉強(直近7日の勉強時間・記録・ルーティン) -->
     <section id="tab-study" hidden>
+      <details class="review" id="reviewBox" hidden>
+        <summary class="card">
+          <span class="review-top"><span>ふりかえり</span><span id="reviewWhen"></span><span class="review-chip" id="reviewChip"></span><i class="review-new" id="reviewNew" hidden></i></span>
+          <span class="review-arrow" aria-hidden="true">›</span>
+          <span class="review-head" id="reviewHead"></span>
+        </summary>
+        <div id="reviewHost"></div>
+      </details>
       <div class="card" id="studyCard">
         <div class="card-h"><h2>勉強時間(直近7日)</h2><button class="help-btn" type="button" aria-label="説明" aria-expanded="false">?</button></div>
         <p class="help" hidden>数えるのは授業以外の勉強です。薄い棒はその日に勉強できた時間、濃い部分が記録した時間。「昨日は何分?」は、昨日がまだ記録されていないときだけ出ます。</p>

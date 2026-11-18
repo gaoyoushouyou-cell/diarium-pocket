@@ -23,7 +23,7 @@
 
   const C = window.PocketCore;
   const A = window.PocketAuth;
-  const APP_VERSION = "2026-11-11.1";
+  const APP_VERSION = "2026-11-18.1";
 
   const KEYS = {
     queue: "pocket.queue",
@@ -171,7 +171,7 @@
   const DIARY_DAY_KINDS = new Set(["entry", "sleep", "money", "photo"]);
   const prefs = Object.assign(
     {
-      bedTime: "", category: {}, lastTab: "todo", taskCategoryId: null, memoNoteId: null, studyAskDismissed: null,
+      bedTime: "", category: {}, lastTab: "todo", taskCategoryId: null, memoNoteId: null, studyAskDismissed: null, reviewSeen: null,
       seg: { idea: "task", entry: "entry", life: "sleep" },
     },
     load(KEYS.prefs, {}),
@@ -230,13 +230,14 @@
     if (name === "send") renderSend();
     if (name === "idea") { renderTaskCats(); renderMemoTargets(); }
     if (name === "todo") renderTodo();
-    if (name === "study") { renderStudy(); renderRoutines(); renderTimer(); }
+    if (name === "study") { renderReview(); renderStudy(); renderRoutines(); renderTimer(); }
     if (name === "project") renderFront();
     if (name === "life") renderSleepHistory();
   }
   // PC から届いた情報を使う表示をすべて描き直す(更新で新しい outbox を読んだとき)
   function renderOutboxViews() {
     renderTodo();
+    renderReview();
     renderStudy();
     renderRoutines();
     renderFront();
@@ -658,6 +659,42 @@
     $("studyAsk").hidden = localY || reportedY || prefs.studyAskDismissed === t;
     $("studyAskText").textContent = `昨日 ${shortDate(y)} は何分勉強しましたか?(0分でも大丈夫です)`;
   }
+
+  // ---------- 週次レビュー(2026-11-18。PC の Claude が書いたものを outbox で受け取って見るだけ) ----------
+  // 中身は PC が作った HTML(数字のグラフと評価・改善案)。見た目がこの画面と混ざらないよう Shadow DOM に入れる。
+  // スクリプトは入っていない(CSP の script-src 'self' で、もし入っていても動かない)。
+  const REVIEW_STATUS = { steady: "回っている", look: "見直したい" };
+  let reviewShown = "";
+  function reviewOf(ob) {
+    const r = ob && ob.weekly_review;
+    return r && r.available && typeof r.html === "string" && r.week_start ? r : null;
+  }
+  function renderReview() {
+    const r = reviewOf(outbox());
+    $("reviewBox").hidden = !r;
+    if (!r) return;
+    const md = (s) => { const [, m, d] = String(s).split("-").map(Number); return `${m}/${d}`; };
+    $("reviewWhen").textContent = r.week_end ? `${md(r.week_start)}–${md(r.week_end)}` : md(r.week_start);
+    const chip = $("reviewChip");
+    chip.textContent = REVIEW_STATUS[r.status] || "";
+    chip.className = "review-chip " + (r.status === "steady" ? "steady" : "look");
+    $("reviewHead").textContent = r.headline || "";
+    $("reviewNew").hidden = prefs.reviewSeen === r.week_start;
+    const key = `${r.week_start}|${r.published_at || ""}`;
+    if (reviewShown !== key) {
+      const host = $("reviewHost");
+      (host.shadowRoot || host.attachShadow({ mode: "open" })).innerHTML = r.html;
+      reviewShown = key;
+    }
+  }
+  $("reviewBox").addEventListener("toggle", () => {
+    const r = reviewOf(outbox());
+    if ($("reviewBox").open && r) {
+      prefs.reviewSeen = r.week_start;
+      savePrefs();
+      $("reviewNew").hidden = true;
+    }
+  });
 
   // ---------- 計測(開始時刻を端末に置き、差で数える。閉じても・ロックしても狂わない) ----------
   // 2026-10-12 から画面には出さない(#timerBox を hidden のまま)。仕組みと保存済みの状態はそのまま残す。
